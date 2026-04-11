@@ -302,11 +302,14 @@ func (ps *ProxyServer) logRequest(
 		return
 	}
 
-	var requestBodyToLog, userAgent string
+	var requestBodyToLog, userAgent, agentFilesToLog string
 
 	if group.EffectiveConfig.EnableRequestBodyLogging {
 		requestBodyToLog = string(bodyBytes)
 		userAgent = c.Request.UserAgent()
+		// 提取agent上传的文件内容（如Cline插件上传的文件）
+		agentFiles := utils.ExtractAgentFiles(bodyBytes)
+		agentFilesToLog = utils.AgentFilesToJSON(agentFiles)
 	}
 
 	duration := time.Since(startTime).Milliseconds()
@@ -324,6 +327,7 @@ func (ps *ProxyServer) logRequest(
 		IsStream:     isStream,
 		UpstreamAddr: utils.TruncateString(upstreamAddr, 500),
 		RequestBody:  requestBodyToLog,
+		AgentFiles:   agentFilesToLog,
 	}
 
 	// Set parent group
