@@ -62,6 +62,38 @@ export interface ParentAggregateGroup {
   weight: number;
 }
 
+// 余额查询配置
+export interface BalanceQueryConfig {
+  enabled: boolean;
+  aggregate_balance: boolean; // 是否汇总所有密钥的余额
+}
+
+// 单个密钥的余额信息
+export interface KeyBalanceInfo {
+  key_id: number;
+  key_value_masked: string;
+  balance_total: string;
+  balance_used: string;
+  currency: string;
+  status: string;
+  id: string;
+  admin_key_id: string;
+  success: boolean;
+  error_message: string;
+}
+
+// 分组余额汇总信息
+export interface GroupBalanceInfo {
+  total_keys: number;
+  success_count: number;
+  fail_count: number;
+  total_balance: string;
+  total_used: string;
+  currency: string;
+  last_updated_at?: string;
+  key_details?: KeyBalanceInfo[];
+}
+
 export interface Group {
   id?: number;
   name: string;
@@ -82,7 +114,9 @@ export interface Group {
   proxy_keys: string;
   group_type?: GroupType;
   sub_groups?: SubGroupInfo[]; // 子分组列表（仅聚合分组）
-  sub_group_ids?: number[]; // 子分组ID列表
+  sub_group_ids?: number[]; // 子分组 ID 列表
+  balance_query_config?: BalanceQueryConfig; // 余额查询配置
+  balance_info?: GroupBalanceInfo; // 余额汇总信息
   created_at?: string;
   updated_at?: string;
 }

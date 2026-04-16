@@ -2,8 +2,9 @@ package services
 
 import (
 	"context"
+	"fmt"
 	"gpt-load/internal/config"
-	"gpt-load/internal/models"
+	"gpt-load/internal/utils"
 	"sync"
 	"time"
 
@@ -73,6 +74,7 @@ func (s *LogCleanupService) run() {
 }
 
 // cleanupExpiredLogs 清理过期的请求日志
+// 对于按日期分表的场景，直接删除旧的表比逐行删除更高效
 func (s *LogCleanupService) cleanupExpiredLogs() {
 	// 获取日志保留天数配置
 	settings := s.settingsManager.GetSettings()
@@ -84,22 +86,65 @@ func (s *LogCleanupService) cleanupExpiredLogs() {
 	}
 
 	// 计算过期时间点
-	cutoffTime := time.Now().AddDate(0, 0, -retentionDays).UTC()
+	cutoffDate := time.Now().AddDate(0, 0, -retentionDays)
 
-	// 执行删除操作
-	result := s.db.Where("timestamp < ?", cutoffTime).Delete(&models.RequestLog{})
-	if result.Error != nil {
-		logrus.WithError(result.Error).Error("Failed to cleanup expired request logs")
+	// 获取需要删除的日期范围内的所有表
+	// 我们删除 cutoffDate 之前的所有表
+	veryOldDate := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
+	tablesToDelete := utils.GetLogTablesForDateRange(veryOldDate, cutoffDate.AddDate(0, 0, -1))
+
+	if len(tablesToDelete) == 0 {
+		logrus.Debug("No old log tables to cleanup")
 		return
 	}
 
-	if result.RowsAffected > 0 {
+	dialect := s.db.Dialector.Name()
+	deletedCount := 0
+
+	for _, tableName := range tablesToDelete {
+		// 检查表是否存在
+		if !s.tableExists(tableName) {
+			continue
+		}
+
+		// 统计表中的记录数
+		var count int64
+		if err := s.db.Table(tableName).Count(&count).Error; err != nil {
+			logrus.WithError(err).WithField("table", tableName).Debug("Failed to count records in table")
+			continue
+		}
+
+		// 删除表
+		var dropErr error
+		if dialect == "mysql" {
+			dropErr = s.db.Exec(fmt.Sprintf("DROP TABLE IF EXISTS %s", tableName)).Error
+		} else {
+			// SQLite
+			dropErr = s.db.Exec(fmt.Sprintf("DROP TABLE IF EXISTS \"%s\"", tableName)).Error
+		}
+
+		if dropErr != nil {
+			logrus.WithError(dropErr).WithField("table", tableName).Error("Failed to drop old log table")
+			continue
+		}
+
+		deletedCount++
 		logrus.WithFields(logrus.Fields{
-			"deleted_count":  result.RowsAffected,
-			"cutoff_time":    cutoffTime.Format(time.RFC3339),
-			"retention_days": retentionDays,
-		}).Info("Successfully cleaned up expired request logs")
-	} else {
-		logrus.Debug("No expired request logs found to cleanup")
+			"table":         tableName,
+			"deleted_count": count,
+		}).Info("Dropped old log table")
 	}
+
+	if deletedCount > 0 {
+		logrus.WithFields(logrus.Fields{
+			"dropped_tables": deletedCount,
+			"cutoff_date":    cutoffDate.Format("2006-01-02"),
+			"retention_days": retentionDays,
+		}).Info("Successfully cleaned up old log tables")
+	}
+}
+
+// tableExists 检查表是否存在
+func (s *LogCleanupService) tableExists(tableName string) bool {
+	return s.db.Migrator().HasTable(tableName)
 }

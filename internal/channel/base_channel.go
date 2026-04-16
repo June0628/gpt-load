@@ -223,6 +223,15 @@ func (b *BaseChannel) TransformModelList(req *http.Request, bodyBytes []byte, gr
 	return response, nil
 }
 
+// GetBalanceQueryPath returns the balance query path for the channel.
+func (b *BaseChannel) GetBalanceQueryPath(group *models.Group) string {
+	if group.BalanceQueryPath != "" {
+		return group.BalanceQueryPath
+	}
+	// 默认返回空字符串，由余额服务根据平台决定使用哪个路径
+	return ""
+}
+
 // buildConfiguredModels builds a list of models from redirect rules
 func buildConfiguredModels(redirectMap map[string]string) []any {
 	if len(redirectMap) == 0 {

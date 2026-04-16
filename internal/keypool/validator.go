@@ -7,6 +7,7 @@ import (
 	"gpt-load/internal/config"
 	"gpt-load/internal/encryption"
 	"gpt-load/internal/models"
+	"gpt-load/internal/services"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -28,6 +29,7 @@ type KeyValidator struct {
 	SettingsManager *config.SystemSettingsManager
 	keypoolProvider *KeyProvider
 	encryptionSvc   encryption.Service
+	balanceService  *services.BalanceService
 }
 
 type KeyValidatorParams struct {
@@ -37,6 +39,7 @@ type KeyValidatorParams struct {
 	SettingsManager *config.SystemSettingsManager
 	KeypoolProvider *KeyProvider
 	EncryptionSvc   encryption.Service
+	BalanceService  *services.BalanceService
 }
 
 // NewKeyValidator creates a new KeyValidator.
@@ -47,6 +50,7 @@ func NewKeyValidator(params KeyValidatorParams) *KeyValidator {
 		SettingsManager: params.SettingsManager,
 		keypoolProvider: params.KeypoolProvider,
 		encryptionSvc:   params.EncryptionSvc,
+		balanceService:  params.BalanceService,
 	}
 }
 
@@ -69,6 +73,21 @@ func (s *KeyValidator) ValidateSingleKey(key *models.APIKey, group *models.Group
 	if !isValid && validationErr != nil {
 		errorMsg = validationErr.Error()
 	}
+
+	// 如果密钥有效且分组启用了余额查询，则查询并更新余额
+	if isValid && group.ShouldQueryBalance() {
+		balanceInfo := s.balanceService.QueryBalance(ctx, group, key)
+		if balanceInfo.Success {
+			// 更新密钥的余额信息
+			s.keypoolProvider.UpdateBalance(key, group, balanceInfo)
+			logrus.WithFields(logrus.Fields{
+				"key_id":   key.ID,
+				"group_id": group.ID,
+				"balance":  balanceInfo.BalanceTotal,
+			}).Debug("Balance queried and updated successfully")
+		}
+	}
+
 	s.keypoolProvider.UpdateStatus(key, group, isValid, errorMsg)
 
 	if !isValid {

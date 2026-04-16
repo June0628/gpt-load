@@ -7,6 +7,7 @@ import (
 	"gpt-load/internal/encryption"
 	app_errors "gpt-load/internal/errors"
 	"gpt-load/internal/models"
+	"gpt-load/internal/services"
 	"gpt-load/internal/store"
 	"math/rand"
 	"strconv"
@@ -647,4 +648,44 @@ func pluckIDs(keys []models.APIKey) []uint {
 		ids[i] = key.ID
 	}
 	return ids
+}
+
+// UpdateBalance 更新密钥的余额信息到数据库和缓存
+func (p *KeyProvider) UpdateBalance(apiKey *models.APIKey, group *models.Group, balanceInfo *services.BalanceInfo) {
+	go func() {
+		keyHashKey := fmt.Sprintf("key:%d", apiKey.ID)
+
+		// 更新数据库
+		updates := map[string]any{
+			"balance_total":  balanceInfo.BalanceTotal,
+			"balance_used":   balanceInfo.BalanceUsed,
+			"balance_status": balanceInfo.Status,
+		}
+
+		if err := p.db.Model(apiKey).Updates(updates).Error; err != nil {
+			logrus.WithFields(logrus.Fields{
+				"key_id": apiKey.ID,
+				"error":  err,
+			}).Error("Failed to update key balance in database")
+		}
+
+		// 更新缓存
+		if err := p.store.HSet(keyHashKey, map[string]any{
+			"balance_total":  balanceInfo.BalanceTotal,
+			"balance_used":   balanceInfo.BalanceUsed,
+			"balance_status": balanceInfo.Status,
+		}); err != nil {
+			logrus.WithFields(logrus.Fields{
+				"key_id": apiKey.ID,
+				"error":  err,
+			}).Error("Failed to update key balance in store")
+		}
+
+		logrus.WithFields(logrus.Fields{
+			"key_id":       apiKey.ID,
+			"group_id":     group.ID,
+			"balance_total": balanceInfo.BalanceTotal,
+			"balance_used":  balanceInfo.BalanceUsed,
+		}).Debug("Key balance updated successfully")
+	}()
 }

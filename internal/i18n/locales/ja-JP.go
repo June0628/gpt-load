@@ -143,6 +143,8 @@ var MessagesJaJP = map[string]string{
 	"config.log_write_interval_desc":          "リクエストログをキャッシュからデータベースに書き込む間隔（分）、0でリアルタイム書き込み。",
 	"config.enable_request_body_logging":      "リクエストボディログを有効化",
 	"config.enable_request_body_logging_desc": "完全なリクエストボディの内容をログに記録するかどうか。有効にするとメモリとストレージの使用量が増加します。",
+	"config.feishu_webhook_url":               "飛書 Webhook URL",
+	"config.feishu_webhook_url_desc":          "キー数不足などの通知を送信するための飛書グループロボット Webhook URL。",
 
 	// Request settings related
 	"config.request_timeout":              "リクエストタイムアウト（秒）",
@@ -170,7 +172,9 @@ var MessagesJaJP = map[string]string{
 	"config.key_validation_concurrency":      "キー検証並行数",
 	"config.key_validation_concurrency_desc": "バックグラウンドで無効なキーを検証する際の並行数。SQLiteや低性能環境では20以下を維持し、データ不整合を回避してください。",
 	"config.key_validation_timeout":          "キー検証タイムアウト（秒）",
-	"config.key_validation_timeout_desc":     "バックグラウンドで単一キーを検証する際のAPIリクエストタイムアウト（秒）。",
+	"config.key_validation_timeout_desc":     "バックグラウンドで単一キーを検証する際の API リクエストタイムアウト（秒）。",
+	"config.invalid_key_count_threshold":     "キー不足通知しきい値",
+	"config.invalid_key_count_threshold_desc": "グループ内の有効キー数がこの値を下回った場合、飛書 Webhook を通じて通知を送信します。0 に設定するとこの機能は無効になります。",
 
 	// Category labels
 	"config.category.basic":   "基本設定",
@@ -208,4 +212,11 @@ var MessagesJaJP = map[string]string{
 	"group.not_aggregate":              "グループはアグリゲートグループではありません",
 	"group.sub_group_already_exists":   "サブグループ{{.sub_group_id}}は既に存在します",
 	"group.sub_group_not_found":        "サブグループが見つかりません",
+
+	// Balance query related
+	"balance.query_success":   "残高照会成功",
+	"balance.query_failed":    "残高照会失敗",
+	"balance.no_balance_info": "残高情報なし",
+	"balance.total_balance":   "総残高",
+	"balance.total_used":      "使用額",
 }

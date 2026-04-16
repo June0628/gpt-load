@@ -458,6 +458,48 @@ function resetPage() {
               </n-statistic>
             </n-grid-item>
             <n-grid-item span="1">
+              <!-- 余额汇总信息 -->
+              <n-statistic :label="`${t('keys.balanceInfo')}`">
+                <template #default>
+                  <div class="balance-info">
+                    <div v-if="group?.balance_info" class="balance-content">
+                      <n-tooltip trigger="hover">
+                        <template #trigger>
+                          <n-gradient-text type="success" size="20">
+                            {{ group.balance_info.total_balance || "N/A" }}
+                          </n-gradient-text>
+                        </template>
+                        {{ t("keys.totalBalance") }}
+                      </n-tooltip>
+                      <n-divider vertical />
+                      <n-tooltip trigger="hover">
+                        <template #trigger>
+                          <n-gradient-text type="warning" size="20">
+                            {{ group.balance_info.total_used || "N/A" }}
+                          </n-gradient-text>
+                        </template>
+                        {{ t("keys.totalUsed") }}
+                      </n-tooltip>
+                      <n-divider vertical />
+                      <n-tooltip trigger="hover">
+                        <template #trigger>
+                          <span class="balance-stats">
+                            <n-tag size="small" type="success">
+                              {{ group.balance_info.success_count }}/{{
+                                group.balance_info.total_keys
+                              }}
+                            </n-tag>
+                          </span>
+                        </template>
+                        {{ t("keys.balanceQuerySuccess") }}
+                      </n-tooltip>
+                    </div>
+                    <span v-else class="no-balance">{{ t("keys.noBalanceInfo") }}</span>
+                  </div>
+                </template>
+              </n-statistic>
+            </n-grid-item>
+            <n-grid-item span="1">
               <n-statistic
                 :label="`${t('keys.stats24Hour')}：${formatNumber(stats?.stats_24_hour?.total_requests ?? 0)}`"
               >
@@ -1048,5 +1090,31 @@ function resetPage() {
   color: var(--error-color, #dc2626);
   font-style: italic;
   font-size: 0.8rem;
+}
+
+/* 余额信息显示样式 */
+.balance-info {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 32px;
+}
+
+.balance-content {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.balance-stats {
+  display: inline-flex;
+  align-items: center;
+}
+
+.no-balance {
+  color: var(--text-tertiary);
+  font-size: 0.875rem;
 }
 </style>

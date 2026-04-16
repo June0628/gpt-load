@@ -143,6 +143,8 @@ var MessagesEnUS = map[string]string{
 	"config.log_write_interval_desc":          "Interval (in minutes) for writing request logs from cache to database, 0 for real-time writes.",
 	"config.enable_request_body_logging":      "Enable Request Body Logging",
 	"config.enable_request_body_logging_desc": "Whether to log complete request body content. Enabling this will increase memory and storage usage.",
+	"config.feishu_webhook_url":               "Feishu Webhook URL",
+	"config.feishu_webhook_url_desc":          "Feishu group robot Webhook URL for sending notifications such as insufficient key count.",
 
 	// Request settings related
 	"config.request_timeout":              "Request Timeout (seconds)",
@@ -171,6 +173,8 @@ var MessagesEnUS = map[string]string{
 	"config.key_validation_concurrency_desc": "Concurrency level for background invalid key validation. Keep below 20 for SQLite or low-performance environments to avoid data consistency issues.",
 	"config.key_validation_timeout":          "Key Validation Timeout (seconds)",
 	"config.key_validation_timeout_desc":     "API request timeout (seconds) when validating a single key in the background.",
+	"config.invalid_key_count_threshold":     "Invalid Key Count Threshold",
+	"config.invalid_key_count_threshold_desc": "Send notification via Feishu Webhook when valid key count in group falls below this value. Set to 0 to disable.",
 
 	// Category labels
 	"config.category.basic":   "Basic",
@@ -208,4 +212,11 @@ var MessagesEnUS = map[string]string{
 	"group.not_aggregate":              "Group is not an aggregate group",
 	"group.sub_group_already_exists":   "Sub group {{.sub_group_id}} already exists",
 	"group.sub_group_not_found":        "Sub group not found",
+
+	// Balance query related
+	"balance.query_success":   "Balance query successful",
+	"balance.query_failed":    "Balance query failed",
+	"balance.no_balance_info": "No balance information",
+	"balance.total_balance":   "Total Balance",
+	"balance.total_used":      "Total Used",
 }

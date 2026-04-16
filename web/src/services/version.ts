@@ -14,7 +14,7 @@ export interface VersionInfo {
   hasUpdate: boolean;
   releaseUrl: string | null;
   lastCheckTime: number;
-  status: "checking" | "latest" | "update-available" | "error";
+  status: "checking" | "latest" | "update-available";
 }
 
 const CACHE_KEY = "gpt-load-version-info";
@@ -154,11 +154,19 @@ class VersionService {
         // 只在成功时缓存结果
         this.setCachedVersionInfo(versionInfo);
       } else {
-        versionInfo.status = "error";
+        // 检查失败时，视为最新版本，不显示错误
+        versionInfo.latestVersion = this.currentVersion;
+        versionInfo.isLatest = true;
+        versionInfo.hasUpdate = false;
+        versionInfo.status = "latest";
       }
     } catch (error) {
       console.warn("Version check failed:", error);
-      versionInfo.status = "error";
+      // 检查失败时，视为最新版本，不显示错误
+      versionInfo.latestVersion = this.currentVersion;
+      versionInfo.isLatest = true;
+      versionInfo.hasUpdate = false;
+      versionInfo.status = "latest";
     }
 
     return versionInfo;

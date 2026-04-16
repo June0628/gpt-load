@@ -432,6 +432,27 @@ export default {
     onlyTxtFileSupported: "Only .txt files are supported",
     fileImportedSuccessfully: "File imported successfully",
     fileReadError: "Failed to read file",
+    // Balance query related
+    balanceInfo: "Balance Summary",
+    totalBalance: "Total Balance",
+    totalUsed: "Used Amount",
+    balanceQuerySuccess: "Query successful",
+    noBalanceInfo: "No balance information",
+    balanceQueryConfig: "Balance Query Configuration",
+    balanceQueryConfigTooltip:
+      "Configure whether to automatically query upstream balance when checking key availability",
+    balanceQueryEnabled: "Enable Balance Query",
+    balanceQueryEnabledTooltip:
+      "When enabled, automatically query upstream balance when checking key availability",
+    balanceQueryEnabledDescription:
+      "When enabled, system will automatically query balance information when validating keys",
+    aggregateBalance: "Aggregate All Keys Balance",
+    aggregateBalanceTooltip:
+      "When enabled, will aggregate the balance of all keys in this group and display the total",
+    aggregateBalanceDescription:
+      "When enabled, will display aggregated total balance on the group card",
+    balanceLastUpdated: "Last Updated",
+    balanceQueryFailed: "Query failed",
   },
   subGroups: {
     addSubGroup: "Add Sub Group",

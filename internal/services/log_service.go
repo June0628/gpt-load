@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"gpt-load/internal/encryption"
 	"gpt-load/internal/models"
+	"gpt-load/internal/utils"
 	"io"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -19,6 +21,24 @@ type ExportableLogKey struct {
 	KeyValue   string `gorm:"column:key_value"`
 	GroupName  string `gorm:"column:group_name"`
 	StatusCode int    `gorm:"column:status_code"`
+}
+
+// buildUnionQuery 构建跨表查询的 UNION ALL 语句
+func (s *LogService) buildUnionQuery(tables []string, whereClause string) string {
+	if len(tables) == 0 {
+		return ""
+	}
+
+	var queryParts []string
+	for _, table := range tables {
+		part := fmt.Sprintf("SELECT * FROM %s", table)
+		if whereClause != "" {
+			part += " WHERE " + whereClause
+		}
+		queryParts = append(queryParts, part)
+	}
+
+	return strings.Join(queryParts, " UNION ALL ")
 }
 
 // LogService provides services related to request logs.
@@ -85,8 +105,83 @@ func (s *LogService) logFiltersScope(c *gin.Context) func(db *gorm.DB) *gorm.DB 
 }
 
 // GetLogsQuery returns a GORM query for fetching logs with filters.
+// 支持跨多个按日期分表的日志表查询
 func (s *LogService) GetLogsQuery(c *gin.Context) *gorm.DB {
-	return s.DB.Model(&models.RequestLog{}).Scopes(s.logFiltersScope(c))
+	// 获取时间范围用于确定查询哪些表
+	startTimeStr := c.Query("start_time")
+	endTimeStr := c.Query("end_time")
+
+	var tables []string
+	if startTimeStr != "" && endTimeStr != "" {
+		if startTime, err := time.Parse(time.RFC3339, startTimeStr); err == nil {
+			if endTime, err := time.Parse(time.RFC3339, endTimeStr); err == nil {
+				tables = utils.GetLogTablesForDateRange(startTime, endTime)
+			}
+		}
+	}
+
+	// 如果无法获取时间范围或只有一张表，使用默认查询
+	if len(tables) <= 1 {
+		return s.DB.Model(&models.RequestLog{}).Scopes(s.logFiltersScope(c))
+	}
+
+	// 多表查询：构建 UNION ALL 查询
+	// 构建 WHERE 子句和参数
+	var args []interface{}
+	whereConditions := []string{}
+
+	// 重新构建 WHERE 条件
+	if parentGroupName := c.Query("parent_group_name"); parentGroupName != "" {
+		whereConditions = append(whereConditions, "parent_group_name LIKE ?")
+		args = append(args, "%"+parentGroupName+"%")
+	}
+	if groupName := c.Query("group_name"); groupName != "" {
+		whereConditions = append(whereConditions, "group_name LIKE ?")
+		args = append(args, "%"+groupName+"%")
+	}
+	if keyValue := c.Query("key_value"); keyValue != "" {
+		keyHash := s.EncryptionSvc.Hash(keyValue)
+		whereConditions = append(whereConditions, "key_hash = ?")
+		args = append(args, keyHash)
+	}
+	if model := c.Query("model"); model != "" {
+		whereConditions = append(whereConditions, "model LIKE ?")
+		args = append(args, "%"+model+"%")
+	}
+	if isSuccessStr := c.Query("is_success"); isSuccessStr != "" {
+		if isSuccess, err := strconv.ParseBool(isSuccessStr); err == nil {
+			whereConditions = append(whereConditions, "is_success = ?")
+			args = append(args, isSuccess)
+		}
+	}
+	if requestType := c.Query("request_type"); requestType != "" {
+		whereConditions = append(whereConditions, "request_type = ?")
+		args = append(args, requestType)
+	}
+	if statusCodeStr := c.Query("status_code"); statusCodeStr != "" {
+		if statusCode, err := strconv.Atoi(statusCodeStr); err == nil {
+			whereConditions = append(whereConditions, "status_code = ?")
+			args = append(args, statusCode)
+		}
+	}
+	if sourceIP := c.Query("source_ip"); sourceIP != "" {
+		whereConditions = append(whereConditions, "source_ip = ?")
+		args = append(args, sourceIP)
+	}
+	if errorContains := c.Query("error_contains"); errorContains != "" {
+		whereConditions = append(whereConditions, "error_message LIKE ?")
+		args = append(args, "%"+errorContains+"%")
+	}
+
+	whereClause := ""
+	if len(whereConditions) > 0 {
+		whereClause = strings.Join(whereConditions, " AND ")
+	}
+
+	unionSQL := s.buildUnionQuery(tables, whereClause)
+
+	// 使用 UNION ALL 查询所有表
+	return s.DB.Raw(unionSQL, args...)
 }
 
 // StreamLogKeysToCSV fetches unique keys from logs based on filters and streams them as a CSV.
@@ -105,7 +200,7 @@ func (s *LogService) StreamLogKeysToCSV(c *gin.Context, writer io.Writer) error 
 
 	baseQuery := s.DB.Model(&models.RequestLog{}).Scopes(s.logFiltersScope(c)).Where("key_hash IS NOT NULL AND key_hash != ''")
 
-	// 使用窗口函数获取每个key_hash的最新记录（避免同一密钥因多次加密产生重复）
+	// 使用窗口函数获取每个 key_hash 的最新记录（避免同一密钥因多次加密产生重复）
 	err := s.DB.Raw(`
 		SELECT
 			key_value,
@@ -128,9 +223,9 @@ func (s *LogService) StreamLogKeysToCSV(c *gin.Context, writer io.Writer) error 
 		return fmt.Errorf("failed to fetch log keys: %w", err)
 	}
 
-	// 解密并写入CSV数据
+	// 解密并写入 CSV 数据
 	for _, record := range results {
-		// 解密密钥用于CSV导出
+		// 解密密钥用于 CSV 导出
 		decryptedKey := record.KeyValue
 		if record.KeyValue != "" {
 			if decrypted, err := s.EncryptionSvc.Decrypt(record.KeyValue); err != nil {

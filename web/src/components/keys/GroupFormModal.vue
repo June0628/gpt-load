@@ -79,6 +79,10 @@ interface GroupFormData {
   header_rules: HeaderRuleItem[];
   proxy_keys: string;
   group_type?: string;
+  balance_query_config?: {
+    enabled: boolean;
+    aggregate_balance: boolean;
+  };
 }
 
 // 表单数据
@@ -104,6 +108,10 @@ const formData = reactive<GroupFormData>({
   header_rules: [] as HeaderRuleItem[],
   proxy_keys: "",
   group_type: "standard",
+  balance_query_config: {
+    enabled: false,
+    aggregate_balance: false,
+  },
 });
 
 const channelTypeOptions = ref<{ label: string; value: string }[]>([]);
@@ -351,6 +359,10 @@ function loadGroupData() {
     })),
     proxy_keys: props.group.proxy_keys || "",
     group_type: props.group.group_type || "standard",
+    balance_query_config: props.group.balance_query_config || {
+      enabled: false,
+      aggregate_balance: false,
+    },
   });
 }
 
@@ -539,6 +551,7 @@ async function handleSubmit() {
           action: rule.action,
         })),
       proxy_keys: formData.proxy_keys,
+      balance_query_config: formData.balance_query_config,
     };
 
     let res: Group;
@@ -1164,6 +1177,99 @@ async function handleSubmit() {
                     placeholder='{"temperature": 0.7}'
                     :rows="4"
                   />
+                </n-form-item>
+              </div>
+
+              <!-- 余额查询配置 -->
+              <div v-if="formData.group_type !== 'aggregate'" class="config-section">
+                <h5 class="config-title-with-tooltip">
+                  {{ t("keys.balanceQueryConfig") }}
+                  <n-tooltip trigger="hover" placement="top">
+                    <template #trigger>
+                      <n-icon :component="HelpCircleOutline" class="help-icon config-help" />
+                    </template>
+                    {{ t("keys.balanceQueryConfigTooltip") }}
+                  </n-tooltip>
+                </h5>
+
+                <n-form-item>
+                  <template #label>
+                    <div class="form-label-with-tooltip">
+                      {{ t("keys.balanceQueryEnabled") }}
+                      <n-tooltip trigger="hover" placement="top">
+                        <template #trigger>
+                          <n-icon :component="HelpCircleOutline" class="help-icon" />
+                        </template>
+                        {{ t("keys.balanceQueryEnabledTooltip") }}
+                      </n-tooltip>
+                    </div>
+                  </template>
+                  <div style="display: flex; align-items: center; gap: 12px">
+                    <n-switch
+                      :checked-value="true"
+                      :unchecked-value="false"
+                      :value="formData.balance_query_config?.enabled"
+                      @update:value="
+                        val => {
+                          if (formData.balance_query_config) {
+                            formData.balance_query_config.enabled = val;
+                          }
+                        }
+                      "
+                    />
+                    <span style="font-size: 14px; color: #666">
+                      {{
+                        formData.balance_query_config?.enabled
+                          ? t("common.enabled")
+                          : t("common.disabled")
+                      }}
+                    </span>
+                  </div>
+                  <template #feedback>
+                    <div style="font-size: 12px; color: #999; margin: 4px 0">
+                      {{ t("keys.balanceQueryEnabledDescription") }}
+                    </div>
+                  </template>
+                </n-form-item>
+
+                <n-form-item v-if="formData.balance_query_config?.enabled">
+                  <template #label>
+                    <div class="form-label-with-tooltip">
+                      {{ t("keys.aggregateBalance") }}
+                      <n-tooltip trigger="hover" placement="top">
+                        <template #trigger>
+                          <n-icon :component="HelpCircleOutline" class="help-icon" />
+                        </template>
+                        {{ t("keys.aggregateBalanceTooltip") }}
+                      </n-tooltip>
+                    </div>
+                  </template>
+                  <div style="display: flex; align-items: center; gap: 12px">
+                    <n-switch
+                      :checked-value="true"
+                      :unchecked-value="false"
+                      :value="formData.balance_query_config?.aggregate_balance"
+                      @update:value="
+                        val => {
+                          if (formData.balance_query_config) {
+                            formData.balance_query_config.aggregate_balance = val;
+                          }
+                        }
+                      "
+                    />
+                    <span style="font-size: 14px; color: #666">
+                      {{
+                        formData.balance_query_config?.aggregate_balance
+                          ? t("common.enabled")
+                          : t("common.disabled")
+                      }}
+                    </span>
+                  </div>
+                  <template #feedback>
+                    <div style="font-size: 12px; color: #999; margin: 4px 0">
+                      {{ t("keys.aggregateBalanceDescription") }}
+                    </div>
+                  </template>
                 </n-form-item>
               </div>
             </n-collapse-item>

@@ -45,11 +45,6 @@ const statusConfig = {
     icon: WarningOutline,
     text: t("footer.updateAvailable"),
   },
-  error: {
-    color: "#d03050",
-    icon: WarningOutline,
-    text: t("footer.checkFailed"),
-  },
 };
 
 const formatVersion = (version: string): string => {

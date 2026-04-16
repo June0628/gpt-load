@@ -40,4 +40,7 @@ type ChannelProxy interface {
 
 	// TransformModelList transforms the model list response based on redirect rules.
 	TransformModelList(req *http.Request, bodyBytes []byte, group *models.Group) (map[string]any, error)
+
+	// GetBalanceQueryPath returns the balance query path for the channel.
+	GetBalanceQueryPath(group *models.Group) string
 }

@@ -432,6 +432,24 @@ export default {
     onlyTxtFileSupported: ".txt ファイルのみサポート",
     fileImportedSuccessfully: "ファイルのインポートに成功しました",
     fileReadError: "ファイルの読み取りに失敗しました",
+    // Balance query related
+    balanceInfo: "残高サマリー",
+    totalBalance: "総残高",
+    totalUsed: "使用額",
+    balanceQuerySuccess: "照会成功",
+    noBalanceInfo: "残高情報なし",
+    balanceQueryConfig: "残高照会設定",
+    balanceQueryConfigTooltip:
+      "キー可用性チェック時にアップストリーム残高を自動的に照会するかどうかを設定",
+    balanceQueryEnabled: "残高照会を有効化",
+    balanceQueryEnabledTooltip:
+      "有効にすると、キー可用性チェック時にアップストリーム残高を自動的に照会",
+    balanceQueryEnabledDescription: "有効にすると、キー検証時に残高情報を自動的に照会します",
+    aggregateBalance: "すべてのキー残高を集約",
+    aggregateBalanceTooltip: "有効にすると、このグループのすべてのキーの残高を集計して合計を表示",
+    aggregateBalanceDescription: "有効にすると、グループカードに集計された総残高を表示",
+    balanceLastUpdated: "最終更新",
+    balanceQueryFailed: "照会失敗",
   },
   subGroups: {
     addSubGroup: "サブグループを追加",

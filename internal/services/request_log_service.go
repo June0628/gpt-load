@@ -7,6 +7,7 @@ import (
 	"gpt-load/internal/config"
 	"gpt-load/internal/models"
 	"gpt-load/internal/store"
+	"gpt-load/internal/utils"
 	"strings"
 	"sync"
 	"time"
@@ -16,6 +17,12 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
+
+// getDailyTx 获取按日期分表的数据库事务对象
+func (s *RequestLogService) getDailyTx(tx *gorm.DB, logDate time.Time) *gorm.DB {
+	tableName := utils.GetDailyLogTableName(logDate)
+	return tx.Table(tableName)
+}
 
 const (
 	RequestLogCachePrefix    = "request_log:"
@@ -202,9 +209,22 @@ func (s *RequestLogService) writeLogsToDB(logs []*models.RequestLog) error {
 		return nil
 	}
 
+	// 按日期分组日志
+	logsByDate := make(map[string][]*models.RequestLog)
+	for _, log := range logs {
+		dateKey := log.Timestamp.Format("20060102")
+		logsByDate[dateKey] = append(logsByDate[dateKey], log)
+	}
+
 	return s.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.CreateInBatches(logs, len(logs)).Error; err != nil {
-			return fmt.Errorf("failed to batch insert request logs: %w", err)
+		// 按日期写入不同的表
+		for dateKey, dateLogs := range logsByDate {
+			date, _ := time.Parse("20060102", dateKey)
+			tableName := utils.GetDailyLogTableName(date)
+
+			if err := tx.Table(tableName).CreateInBatches(dateLogs, len(dateLogs)).Error; err != nil {
+				return fmt.Errorf("failed to batch insert request logs into %s: %w", tableName, err)
+			}
 		}
 
 		type keyUsageStat struct {

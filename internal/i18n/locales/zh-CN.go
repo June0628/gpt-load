@@ -143,6 +143,8 @@ var MessagesZhCN = map[string]string{
 	"config.log_write_interval_desc":          "请求日志从缓存写入数据库的周期（分钟），0为实时写入数据。",
 	"config.enable_request_body_logging":      "启用日志详情",
 	"config.enable_request_body_logging_desc": "是否在请求日志中记录完整的请求体内容。启用此功能会增加内存以及存储空间的占用。",
+	"config.feishu_webhook_url":               "飞书 Webhook 地址",
+	"config.feishu_webhook_url_desc":          "飞书群机器人 Webhook 地址，用于发送密钥数量不足等通知。",
 
 	// Request settings related
 	"config.request_timeout":              "请求超时（秒）",
@@ -171,6 +173,8 @@ var MessagesZhCN = map[string]string{
 	"config.key_validation_concurrency_desc": "后台定时验证无效 Key 时的并发数，如果使用SQLite或者运行环境性能不佳，请尽量保证20以下，避免过高的并发导致数据不一致问题。",
 	"config.key_validation_timeout":          "密钥验证超时（秒）",
 	"config.key_validation_timeout_desc":     "后台定时验证单个 Key 时的 API 请求超时时间（秒）。",
+	"config.invalid_key_count_threshold":     "密钥不足通知阈值",
+	"config.invalid_key_count_threshold_desc": "当分组内有效密钥数量低于此值时，通过飞书 Webhook 发送通知。设为 0 禁用此功能。",
 
 	// Category labels
 	"config.category.basic":   "基础参数",
@@ -208,4 +212,11 @@ var MessagesZhCN = map[string]string{
 	"group.not_aggregate":              "该分组不是聚合分组",
 	"group.sub_group_already_exists":   "子分组{{.sub_group_id}}已存在",
 	"group.sub_group_not_found":        "子分组不存在",
+
+	// Balance query related
+	"balance.query_success":   "余额查询成功",
+	"balance.query_failed":    "余额查询失败",
+	"balance.no_balance_info": "无余额信息",
+	"balance.total_balance":   "总余额",
+	"balance.total_used":      "已用金额",
 }

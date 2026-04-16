@@ -38,6 +38,10 @@ type GroupConfig struct {
 	KeyValidationConcurrency     *int    `json:"key_validation_concurrency,omitempty"`
 	KeyValidationTimeoutSeconds  *int    `json:"key_validation_timeout_seconds,omitempty"`
 	EnableRequestBodyLogging     *bool   `json:"enable_request_body_logging,omitempty"`
+	// 通知配置
+	InvalidKeyCountThreshold *int `json:"invalid_key_count_threshold,omitempty"` // 无效密钥数量阈值，超过此数量时发送通知
+	// 余额查询配置
+	EnableBalanceQuery *bool `json:"enable_balance_query,omitempty"` // 是否启用余额查询
 }
 
 // HeaderRule defines a single rule for header manipulation.
@@ -90,6 +94,8 @@ type Group struct {
 	Upstreams           datatypes.JSON       `gorm:"type:json;not null" json:"upstreams"`
 	ValidationEndpoint  string               `gorm:"type:varchar(255)" json:"validation_endpoint"`
 	ChannelType         string               `gorm:"type:varchar(50);not null" json:"channel_type"`
+	EnableBalanceQuery  bool                 `gorm:"default:false" json:"enable_balance_query"`
+	BalanceQueryPath    string               `gorm:"type:varchar(500)" json:"balance_query_path"`
 	Sort                int                  `gorm:"default:0" json:"sort"`
 	TestModel           string               `gorm:"type:varchar(255);not null" json:"test_model"`
 	ParamOverrides      datatypes.JSONMap    `gorm:"type:json" json:"param_overrides"`
@@ -109,6 +115,11 @@ type Group struct {
 	ModelRedirectMap map[string]string   `gorm:"-" json:"-"`
 }
 
+// ShouldQueryBalance 判断是否应该查询余额
+func (g *Group) ShouldQueryBalance() bool {
+	return g.EnableBalanceQuery
+}
+
 // APIKey 对应 api_keys 表
 type APIKey struct {
 	ID           uint       `gorm:"primaryKey;autoIncrement;index:idx_api_keys_group_last_used_id,priority:3" json:"id"`
@@ -122,6 +133,11 @@ type APIKey struct {
 	LastUsedAt   *time.Time `gorm:"index:idx_api_keys_group_last_used_id,priority:2" json:"last_used_at"`
 	CreatedAt    time.Time  `json:"created_at"`
 	UpdatedAt    time.Time  `json:"updated_at"`
+
+	// 余额信息字段
+	BalanceTotal  string `gorm:"type:varchar(100);default:''" json:"balance_total"`
+	BalanceUsed   string `gorm:"type:varchar(100);default:''" json:"balance_used"`
+	BalanceStatus string `gorm:"type:varchar(100);default:''" json:"balance_status"`
 }
 
 // RequestType 请求类型常量
