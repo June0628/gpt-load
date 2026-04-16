@@ -7,7 +7,6 @@ import (
 	"gpt-load/internal/encryption"
 	app_errors "gpt-load/internal/errors"
 	"gpt-load/internal/models"
-	"gpt-load/internal/services"
 	"gpt-load/internal/store"
 	"math/rand"
 	"strconv"
@@ -651,7 +650,7 @@ func pluckIDs(keys []models.APIKey) []uint {
 }
 
 // UpdateBalance 更新密钥的余额信息到数据库和缓存
-func (p *KeyProvider) UpdateBalance(apiKey *models.APIKey, group *models.Group, balanceInfo *services.BalanceInfo) {
+func (p *KeyProvider) UpdateBalance(apiKey *models.APIKey, group *models.Group, balanceInfo *models.BalanceInfo) {
 	go func() {
 		keyHashKey := fmt.Sprintf("key:%d", apiKey.ID)
 

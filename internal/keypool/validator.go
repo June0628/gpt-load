@@ -3,11 +3,11 @@ package keypool
 import (
 	"context"
 	"fmt"
+	"gpt-load/internal/balance"
 	"gpt-load/internal/channel"
 	"gpt-load/internal/config"
 	"gpt-load/internal/encryption"
 	"gpt-load/internal/models"
-	"gpt-load/internal/services"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -29,7 +29,7 @@ type KeyValidator struct {
 	SettingsManager *config.SystemSettingsManager
 	keypoolProvider *KeyProvider
 	encryptionSvc   encryption.Service
-	balanceService  *services.BalanceService
+	balanceService  *balance.BalanceService
 }
 
 type KeyValidatorParams struct {
@@ -39,7 +39,7 @@ type KeyValidatorParams struct {
 	SettingsManager *config.SystemSettingsManager
 	KeypoolProvider *KeyProvider
 	EncryptionSvc   encryption.Service
-	BalanceService  *services.BalanceService
+	BalanceService  *balance.BalanceService
 }
 
 // NewKeyValidator creates a new KeyValidator.
@@ -76,8 +76,14 @@ func (s *KeyValidator) ValidateSingleKey(key *models.APIKey, group *models.Group
 
 	// 如果密钥有效且分组启用了余额查询，则查询并更新余额
 	if isValid && group.ShouldQueryBalance() {
-		balanceInfo := s.balanceService.QueryBalance(ctx, group, key)
-		if balanceInfo.Success {
+		balanceInfo, err := s.balanceService.QueryBalance(ctx, group, key)
+		if err != nil {
+			logrus.WithFields(logrus.Fields{
+				"key_id":   key.ID,
+				"group_id": group.ID,
+				"error":    err,
+			}).Debug("Balance query failed")
+		} else if balanceInfo != nil && balanceInfo.Success {
 			// 更新密钥的余额信息
 			s.keypoolProvider.UpdateBalance(key, group, balanceInfo)
 			logrus.WithFields(logrus.Fields{

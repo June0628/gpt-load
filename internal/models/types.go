@@ -7,6 +7,25 @@ import (
 	"gorm.io/datatypes"
 )
 
+// BalanceInfo 存储 API 密钥的余额信息
+type BalanceInfo struct {
+	Success      bool    `json:"success"`
+	BalanceTotal string  `json:"balance_total,omitempty"`  // 余额总量
+	BalanceUsed  string  `json:"balance_used,omitempty"`   // 已用余额
+	Currency     string  `json:"currency,omitempty"`       // 货币单位
+	Status       string  `json:"status,omitempty"`         // 账户状态
+	ID           string  `json:"id,omitempty"`             // 账户/密钥 ID
+	AdminKeyID   string  `json:"admin_key_id,omitempty"`   // 管理密钥 ID（特定平台）
+	ErrorMessage string  `json:"error_message,omitempty"`  // 错误信息
+	RawData      string  `json:"raw_data,omitempty"`       // 原始响应数据（用于调试）
+}
+
+// BalanceQueryResult 存储单个密钥的余额查询结果
+type BalanceQueryResult struct {
+	APIKey      *APIKey     `json:"api_key"`
+	BalanceInfo *BalanceInfo `json:"balance_info"`
+}
+
 // Key状态
 const (
 	KeyStatusActive  = "active"

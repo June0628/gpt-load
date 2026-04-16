@@ -1,4 +1,4 @@
-package services
+package balance
 
 import (
 	"context"
@@ -13,24 +13,11 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// BalanceInfo 存储 API 密钥的余额信息
-type BalanceInfo struct {
-	Success      bool    `json:"success"`
-	BalanceTotal string  `json:"balance_total,omitempty"`  // 余额总量
-	BalanceUsed  string  `json:"balance_used,omitempty"`   // 已用余额
-	Currency     string  `json:"currency,omitempty"`       // 货币单位
-	Status       string  `json:"status,omitempty"`         // 账户状态
-	ID           string  `json:"id,omitempty"`             // 账户/密钥 ID
-	AdminKeyID   string  `json:"admin_key_id,omitempty"`   // 管理密钥 ID（特定平台）
-	ErrorMessage string  `json:"error_message,omitempty"`  // 错误信息
-	RawData      string  `json:"raw_data,omitempty"`       // 原始响应数据（用于调试）
-}
+// BalanceInfo 是 models.BalanceInfo 的别名，便于本包使用
+type BalanceInfo = models.BalanceInfo
 
-// BalanceQueryResult 存储单个密钥的余额查询结果
-type BalanceQueryResult struct {
-	APIKey      *models.APIKey `json:"api_key"`
-	BalanceInfo *BalanceInfo   `json:"balance_info"`
-}
+// BalanceQueryResult 是 models.BalanceQueryResult 的别名，便于本包使用
+type BalanceQueryResult = models.BalanceQueryResult
 
 // BalanceService 处理不同平台的余额查询
 type BalanceService struct {

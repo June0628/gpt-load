@@ -3,6 +3,7 @@ package container
 
 import (
 	"gpt-load/internal/app"
+	"gpt-load/internal/balance"
 	"gpt-load/internal/channel"
 	"gpt-load/internal/config"
 	"gpt-load/internal/db"
@@ -49,6 +50,9 @@ func BuildContainer() (*dig.Container, error) {
 	}
 
 	// Business Services
+	if err := container.Provide(balance.NewBalanceService); err != nil {
+		return nil, err
+	}
 	if err := container.Provide(services.NewTaskService); err != nil {
 		return nil, err
 	}
