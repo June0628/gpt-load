@@ -110,6 +110,49 @@ func createDailyLogTable(db *gorm.DB, dialect string, tableName string) error {
 	return db.Exec(createSQL).Error
 }
 
+// ensureLegacyTableColumns 确保旧表中有所有必需的列
+func ensureLegacyTableColumns(db *gorm.DB) error {
+	logrus.Info("Checking and adding missing columns to legacy request_logs table...")
+
+	// 定义需要检查的列及其定义
+	requiredColumns := map[string]string{
+		"duration_ms":    "BIGINT NOT NULL DEFAULT 0",
+		"request_path":   "VARCHAR(500)",
+		"error_message":  "TEXT",
+		"user_agent":     "VARCHAR(512)",
+		"request_type":   "VARCHAR(20) NOT NULL DEFAULT 'final'",
+		"upstream_addr":   "VARCHAR(500)",
+		"is_stream":      "TINYINT(1) NOT NULL DEFAULT 0",
+		"agent_files":    "LONGTEXT",
+	}
+
+	for columnName, columnDef := range requiredColumns {
+		var columnExists int64
+		err := db.Raw(`
+			SELECT COUNT(*)
+			FROM information_schema.COLUMNS
+			WHERE TABLE_SCHEMA = DATABASE()
+			AND TABLE_NAME = 'request_logs'
+			AND COLUMN_NAME = ?
+		`, columnName).Scan(&columnExists).Error
+
+		if err != nil {
+			return fmt.Errorf("failed to check column %s existence: %w", columnName, err)
+		}
+
+		if columnExists == 0 {
+			logrus.Infof("Adding missing column %s to request_logs table", columnName)
+			alterSQL := fmt.Sprintf("ALTER TABLE request_logs ADD COLUMN %s %s", columnName, columnDef)
+			if err := db.Exec(alterSQL).Error; err != nil {
+				return fmt.Errorf("failed to add column %s: %w", columnName, err)
+			}
+			logrus.Infof("Successfully added column %s", columnName)
+		}
+	}
+
+	return nil
+}
+
 // migrateLegacyData 将旧表的数据迁移到按日期分表中
 func migrateLegacyData(db *gorm.DB) error {
 	logrus.Info("Migrating legacy data from request_logs to daily tables...")
@@ -130,6 +173,11 @@ func migrateLegacyData(db *gorm.DB) error {
 	if tableExists == 0 {
 		logrus.Info("Legacy request_logs table does not exist, skipping data migration")
 		return nil
+	}
+
+	// 检查并添加缺失的列
+	if err := ensureLegacyTableColumns(db); err != nil {
+		return fmt.Errorf("failed to ensure legacy table columns: %w", err)
 	}
 
 	// 检查是否有数据
