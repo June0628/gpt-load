@@ -180,7 +180,7 @@ type RequestLog struct {
 	SourceIP        string    `gorm:"type:varchar(64)" json:"source_ip"`
 	StatusCode      int       `gorm:"not null" json:"status_code"`
 	RequestPath     string    `gorm:"type:varchar(500)" json:"request_path"`
-	Duration        int64     `gorm:"not null" json:"duration_ms"`
+	Duration        int64     `gorm:"column:duration_ms;not null" json:"duration_ms"`
 	ErrorMessage    string    `gorm:"type:text" json:"error_message"`
 	UserAgent       string    `gorm:"type:varchar(512)" json:"user_agent"`
 	RequestType     string    `gorm:"type:varchar(20);not null;default:'final';index" json:"request_type"`

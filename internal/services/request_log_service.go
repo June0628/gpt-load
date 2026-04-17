@@ -222,7 +222,7 @@ func (s *RequestLogService) writeLogsToDB(logs []*models.RequestLog) error {
 			date, _ := time.Parse("20060102", dateKey)
 			tableName := utils.GetDailyLogTableName(date)
 
-			if err := tx.Table(tableName).CreateInBatches(dateLogs, len(dateLogs)).Error; err != nil {
+			if err := tx.Model(&models.RequestLog{}).Table(tableName).CreateInBatches(dateLogs, len(dateLogs)).Error; err != nil {
 				return fmt.Errorf("failed to batch insert request logs into %s: %w", tableName, err)
 			}
 		}
