@@ -103,6 +103,12 @@ type GroupCreateParams struct {
 	SubGroups           []SubGroupInput
 }
 
+// BalanceQueryConfigParams captures balance query configuration for a group.
+type BalanceQueryConfigParams struct {
+	Enabled          bool
+	AggregateBalance bool
+}
+
 // GroupUpdateParams captures updatable fields for a group.
 type GroupUpdateParams struct {
 	Name                *string
@@ -123,6 +129,7 @@ type GroupUpdateParams struct {
 	HeaderRules         *[]models.HeaderRule
 	ProxyKeys           *string
 	SubGroups           *[]SubGroupInput
+	BalanceQueryConfig  *BalanceQueryConfigParams
 }
 
 // GroupReorderItem captures a group ID and target sort value.
@@ -482,6 +489,11 @@ func (s *GroupService) UpdateGroup(ctx context.Context, id uint, params GroupUpd
 			headerRulesJSON = datatypes.JSON("[]")
 		}
 		group.HeaderRules = headerRulesJSON
+	}
+
+	if params.BalanceQueryConfig != nil {
+		group.EnableBalanceQuery = params.BalanceQueryConfig.Enabled
+		group.AggregateBalance = params.BalanceQueryConfig.AggregateBalance
 	}
 
 	if err := tx.Save(&group).Error; err != nil {

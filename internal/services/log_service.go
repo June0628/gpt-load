@@ -172,6 +172,19 @@ func (s *LogService) GetLogsQuery(c *gin.Context) *gorm.DB {
 		whereConditions = append(whereConditions, "error_message LIKE ?")
 		args = append(args, "%"+errorContains+"%")
 	}
+	// 添加时间范围过滤条件
+	if startTimeStr != "" {
+		if startTime, err := time.Parse(time.RFC3339, startTimeStr); err == nil {
+			whereConditions = append(whereConditions, "timestamp >= ?")
+			args = append(args, startTime)
+		}
+	}
+	if endTimeStr != "" {
+		if endTime, err := time.Parse(time.RFC3339, endTimeStr); err == nil {
+			whereConditions = append(whereConditions, "timestamp <= ?")
+			args = append(args, endTime)
+		}
+	}
 
 	whereClause := ""
 	if len(whereConditions) > 0 {

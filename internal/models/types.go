@@ -114,6 +114,7 @@ type Group struct {
 	ValidationEndpoint  string               `gorm:"type:varchar(255)" json:"validation_endpoint"`
 	ChannelType         string               `gorm:"type:varchar(50);not null" json:"channel_type"`
 	EnableBalanceQuery  bool                 `gorm:"default:false" json:"enable_balance_query"`
+	AggregateBalance    bool                 `gorm:"default:false" json:"aggregate_balance"`
 	BalanceQueryPath    string               `gorm:"type:varchar(500)" json:"balance_query_path"`
 	Sort                int                  `gorm:"default:0" json:"sort"`
 	TestModel           string               `gorm:"type:varchar(255);not null" json:"test_model"`

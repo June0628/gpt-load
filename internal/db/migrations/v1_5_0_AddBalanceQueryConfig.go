@@ -56,5 +56,26 @@ func V1_5_0_AddBalanceQueryConfig(db *gorm.DB) error {
 		}
 	}
 
+	// 检查 aggregate_balance 列是否已存在
+	var aggregateBalanceColumnExists int64
+	err = db.Raw(`
+		SELECT COUNT(*)
+		FROM information_schema.COLUMNS
+		WHERE TABLE_SCHEMA = DATABASE()
+		AND TABLE_NAME = 'groups'
+		AND COLUMN_NAME = 'aggregate_balance'
+	`).Scan(&aggregateBalanceColumnExists).Error
+
+	if err != nil && db.Dialector.Name() != "sqlite" {
+		// 继续执行
+	}
+
+	if aggregateBalanceColumnExists == 0 {
+		// 添加 aggregate_balance 列
+		if err := db.Exec("ALTER TABLE groups ADD COLUMN aggregate_balance TINYINT(1) DEFAULT 0").Error; err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
