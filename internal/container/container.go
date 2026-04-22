@@ -74,6 +74,9 @@ func BuildContainer() (*dig.Container, error) {
 	if err := container.Provide(services.NewLogCleanupService); err != nil {
 		return nil, err
 	}
+	if err := container.Provide(services.NewLogUploadService); err != nil {
+		return nil, err
+	}
 	if err := container.Provide(services.NewRequestLogService); err != nil {
 		return nil, err
 	}

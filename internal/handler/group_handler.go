@@ -48,21 +48,22 @@ func (s *Server) handleGroupError(c *gin.Context, err error) bool {
 
 // GroupCreateRequest defines the payload for creating a group.
 type GroupCreateRequest struct {
-	Name                string              `json:"name"`
-	DisplayName         string              `json:"display_name"`
-	Description         string              `json:"description"`
-	GroupType           string              `json:"group_type"` // 'standard' or 'aggregate'
-	Upstreams           json.RawMessage     `json:"upstreams"`
-	ChannelType         string              `json:"channel_type"`
-	Sort                int                 `json:"sort"`
-	TestModel           string              `json:"test_model"`
-	ValidationEndpoint  string              `json:"validation_endpoint"`
-	ParamOverrides      map[string]any      `json:"param_overrides"`
-	ModelRedirectRules  map[string]string   `json:"model_redirect_rules"`
-	ModelRedirectStrict bool                `json:"model_redirect_strict"`
-	Config              map[string]any      `json:"config"`
-	HeaderRules         []models.HeaderRule `json:"header_rules"`
-	ProxyKeys           string              `json:"proxy_keys"`
+	Name                string                     `json:"name"`
+	DisplayName         string                     `json:"display_name"`
+	Description         string                     `json:"description"`
+	GroupType           string                     `json:"group_type"` // 'standard' or 'aggregate'
+	Upstreams           json.RawMessage            `json:"upstreams"`
+	ChannelType         string                     `json:"channel_type"`
+	Sort                int                        `json:"sort"`
+	TestModel           string                     `json:"test_model"`
+	ValidationEndpoint  string                     `json:"validation_endpoint"`
+	ParamOverrides      map[string]any             `json:"param_overrides"`
+	ModelRedirectRules  map[string]string          `json:"model_redirect_rules"`
+	ModelRedirectStrict bool                       `json:"model_redirect_strict"`
+	Config              map[string]any             `json:"config"`
+	HeaderRules         []models.HeaderRule        `json:"header_rules"`
+	ProxyKeys           string                     `json:"proxy_keys"`
+	BalanceQueryConfig  *BalanceQueryConfigRequest `json:"balance_query_config,omitempty"`
 }
 
 // CreateGroup handles the creation of a new group.
@@ -89,6 +90,13 @@ func (s *Server) CreateGroup(c *gin.Context) {
 		Config:              req.Config,
 		HeaderRules:         req.HeaderRules,
 		ProxyKeys:           req.ProxyKeys,
+	}
+
+	if req.BalanceQueryConfig != nil {
+		params.BalanceQueryConfig = &services.BalanceQueryConfigParams{
+			Enabled:          req.BalanceQueryConfig.Enabled,
+			AggregateBalance: req.BalanceQueryConfig.AggregateBalance,
+		}
 	}
 
 	group, err := s.GroupService.CreateGroup(c.Request.Context(), params)

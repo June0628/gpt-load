@@ -26,6 +26,20 @@ type SystemSettings struct {
 	EnableRequestBodyLogging       bool   `json:"enable_request_body_logging" default:"false" name:"config.enable_request_body_logging" category:"config.category.basic" desc:"config.enable_request_body_logging_desc"`
 	FeishuWebhookURL               string `json:"feishu_webhook_url" name:"config.feishu_webhook_url" category:"config.category.basic" desc:"config.feishu_webhook_url_desc"`
 
+	// 日志上传配置
+	LogUploadEnabled               bool   `json:"log_upload_enabled" default:"false" name:"config.log_upload_enabled" category:"config.category.log_upload" desc:"config.log_upload_enabled_desc"`
+	LogUploadBeforeDelete          bool   `json:"log_upload_before_delete" default:"true" name:"config.log_upload_before_delete" category:"config.category.log_upload" desc:"config.log_upload_before_delete_desc"`
+	LogUploadDirectory             string `json:"log_upload_directory" default:"logs" name:"config.log_upload_directory" category:"config.category.log_upload" desc:"config.log_upload_directory_desc"`
+	LogUploadFilenamePrefix        string `json:"log_upload_filename_prefix" default:"gpt-load-logs" name:"config.log_upload_filename_prefix" category:"config.category.log_upload" desc:"config.log_upload_filename_prefix_desc"`
+	LogUploadProvider              string `json:"log_upload_provider" default:"tencent" name:"config.log_upload_provider" category:"config.category.log_upload" desc:"config.log_upload_provider_desc" validate:"required"`
+	LogUploadTencentSecretID       string `json:"log_upload_tencent_secret_id" name:"config.log_upload_tencent_secret_id" category:"config.category.log_upload" desc:"config.log_upload_tencent_secret_id_desc"`
+	LogUploadTencentSecretKey      string `json:"log_upload_tencent_secret_key" name:"config.log_upload_tencent_secret_key" category:"config.category.log_upload" desc:"config.log_upload_tencent_secret_key_desc"`
+	LogUploadTencentBucket         string `json:"log_upload_tencent_bucket" name:"config.log_upload_tencent_bucket" category:"config.category.log_upload" desc:"config.log_upload_tencent_bucket_desc"`
+	LogUploadTencentRegion         string `json:"log_upload_tencent_region" default:"ap-guangzhou" name:"config.log_upload_tencent_region" category:"config.category.log_upload" desc:"config.log_upload_tencent_region_desc"`
+	LogUploadWebDAVURL             string `json:"log_upload_webdav_url" name:"config.log_upload_webdav_url" category:"config.category.log_upload" desc:"config.log_upload_webdav_url_desc"`
+	LogUploadWebDAVUsername        string `json:"log_upload_webdav_username" name:"config.log_upload_webdav_username" category:"config.category.log_upload" desc:"config.log_upload_webdav_username_desc"`
+	LogUploadWebDAVPassword        string `json:"log_upload_webdav_password" name:"config.log_upload_webdav_password" category:"config.category.log_upload" desc:"config.log_upload_webdav_password_desc"`
+
 	// 请求设置
 	RequestTimeout        int    `json:"request_timeout" default:"600" name:"config.request_timeout" category:"config.category.request" desc:"config.request_timeout_desc" validate:"required,min=1"`
 	ConnectTimeout        int    `json:"connect_timeout" default:"15" name:"config.connect_timeout" category:"config.category.request" desc:"config.connect_timeout_desc" validate:"required,min=1"`
@@ -82,6 +96,26 @@ type LogConfig struct {
 	Format     string `json:"format"`
 	EnableFile bool   `json:"enable_file"`
 	FilePath   string `json:"file_path"`
+}
+
+// LogUploadConfig represents log upload configuration for external storage
+type LogUploadConfig struct {
+	// Common settings
+	EnableAutoUpload    bool   `json:"enable_auto_upload"`
+	UploadBeforeDelete  bool   `json:"upload_before_delete"`
+	UploadDirectory     string `json:"upload_directory"`
+	UploadFilenamePrefix string `json:"upload_filename_prefix"`
+
+	// Tencent COS settings
+	TencentSecretID     string `json:"tencent_secret_id"`
+	TencentSecretKey    string `json:"tencent_secret_key"`
+	TencentCOSBucket    string `json:"tencent_cos_bucket"`
+	TencentCOSRegion    string `json:"tencent_cos_region"`
+
+	// WebDAV settings
+	WebDAVURL      string `json:"webdav_url"`
+	WebDAVUsername string `json:"webdav_username"`
+	WebDAVPassword string `json:"webdav_password"`
 }
 
 // DatabaseConfig represents database configuration

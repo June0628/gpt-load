@@ -101,6 +101,7 @@ type GroupCreateParams struct {
 	HeaderRules         []models.HeaderRule
 	ProxyKeys           string
 	SubGroups           []SubGroupInput
+	BalanceQueryConfig  *BalanceQueryConfigParams
 }
 
 // BalanceQueryConfigParams captures balance query configuration for a group.
@@ -254,6 +255,11 @@ func (s *GroupService) CreateGroup(ctx context.Context, params GroupCreateParams
 		Config:              cleanedConfig,
 		HeaderRules:         headerRulesJSON,
 		ProxyKeys:           strings.TrimSpace(params.ProxyKeys),
+	}
+
+	if params.BalanceQueryConfig != nil {
+		group.EnableBalanceQuery = params.BalanceQueryConfig.Enabled
+		group.AggregateBalance = params.BalanceQueryConfig.AggregateBalance
 	}
 
 	tx := s.db.WithContext(ctx).Begin()

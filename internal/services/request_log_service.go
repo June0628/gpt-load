@@ -203,6 +203,80 @@ func (s *RequestLogService) flush() {
 	}
 }
 
+func (s *RequestLogService) ensureDailyLogTable(tx *gorm.DB, logDate time.Time) error {
+	tableName := utils.GetDailyLogTableName(logDate)
+
+	if tx.Migrator().HasTable(tableName) {
+		return nil
+	}
+
+	createTableSQL := ""
+	switch tx.Dialector.Name() {
+	case "mysql":
+		createTableSQL = fmt.Sprintf(`
+			CREATE TABLE IF NOT EXISTS %s (
+				id VARCHAR(36) PRIMARY KEY,
+				timestamp DATETIME(3) NOT NULL,
+				group_id BIGINT UNSIGNED NOT NULL,
+				group_name VARCHAR(255),
+				parent_group_id BIGINT UNSIGNED,
+				parent_group_name VARCHAR(255),
+				key_value TEXT,
+				key_hash VARCHAR(128),
+				model VARCHAR(255),
+				is_success TINYINT(1) NOT NULL DEFAULT 0,
+				source_ip VARCHAR(64),
+				status_code INT NOT NULL,
+				request_path VARCHAR(500),
+				duration_ms BIGINT NOT NULL,
+				error_message TEXT,
+				user_agent VARCHAR(512),
+				request_type VARCHAR(20) NOT NULL DEFAULT 'final',
+				upstream_addr VARCHAR(500),
+				is_stream TINYINT(1) NOT NULL DEFAULT 0,
+				request_body MEDIUMTEXT,
+				agent_files LONGTEXT,
+				INDEX idx_timestamp (timestamp),
+				INDEX idx_group_id (group_id),
+				INDEX idx_group_name (group_name),
+				INDEX idx_parent_group_id (parent_group_id),
+				INDEX idx_parent_group_name (parent_group_name),
+				INDEX idx_key_hash (key_hash),
+				INDEX idx_model (model),
+				INDEX idx_request_type (request_type)
+			) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+		`, tableName)
+	default:
+		createTableSQL = fmt.Sprintf(`
+			CREATE TABLE IF NOT EXISTS %s (
+				id TEXT PRIMARY KEY,
+				timestamp TEXT NOT NULL,
+				group_id INTEGER NOT NULL,
+				group_name TEXT,
+				parent_group_id INTEGER,
+				parent_group_name TEXT,
+				key_value TEXT,
+				key_hash TEXT,
+				model TEXT,
+				is_success INTEGER NOT NULL DEFAULT 0,
+				source_ip TEXT,
+				status_code INTEGER NOT NULL,
+				request_path TEXT,
+				duration_ms INTEGER NOT NULL,
+				error_message TEXT,
+				user_agent TEXT,
+				request_type TEXT NOT NULL DEFAULT 'final',
+				upstream_addr TEXT,
+				is_stream INTEGER NOT NULL DEFAULT 0,
+				request_body TEXT,
+				agent_files TEXT
+			)
+		`, tableName)
+	}
+
+	return tx.Exec(createTableSQL).Error
+}
+
 // writeLogsToDB writes a batch of request logs to the database
 func (s *RequestLogService) writeLogsToDB(logs []*models.RequestLog) error {
 	if len(logs) == 0 {
@@ -221,6 +295,10 @@ func (s *RequestLogService) writeLogsToDB(logs []*models.RequestLog) error {
 		for dateKey, dateLogs := range logsByDate {
 			date, _ := time.Parse("20060102", dateKey)
 			tableName := utils.GetDailyLogTableName(date)
+
+			if err := s.ensureDailyLogTable(tx, date); err != nil {
+				return fmt.Errorf("failed to ensure daily log table %s: %w", tableName, err)
+			}
 
 			if err := tx.Model(&models.RequestLog{}).Table(tableName).CreateInBatches(dateLogs, len(dateLogs)).Error; err != nil {
 				return fmt.Errorf("failed to batch insert request logs into %s: %w", tableName, err)

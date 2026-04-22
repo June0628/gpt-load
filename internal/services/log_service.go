@@ -104,6 +104,25 @@ func (s *LogService) logFiltersScope(c *gin.Context) func(db *gorm.DB) *gorm.DB 
 	}
 }
 
+func (s *LogService) tableExists(tableName string) bool {
+	return s.DB.Migrator().HasTable(tableName)
+}
+
+func (s *LogService) getExistingLogTables(tableNames []string) []string {
+	existingTables := make([]string, 0, len(tableNames))
+	for _, tableName := range tableNames {
+		if s.tableExists(tableName) {
+			existingTables = append(existingTables, tableName)
+		}
+	}
+	return existingTables
+}
+
+func (s *LogService) getEmptyLogsQuery() *gorm.DB {
+	todayTable := utils.GetDailyLogTableName(time.Now())
+	return s.DB.Table(todayTable).Where("1 = 0")
+}
+
 // GetLogsQuery returns a GORM query for fetching logs with filters.
 // 支持跨多个按日期分表的日志表查询
 func (s *LogService) GetLogsQuery(c *gin.Context) *gorm.DB {
@@ -120,9 +139,22 @@ func (s *LogService) GetLogsQuery(c *gin.Context) *gorm.DB {
 		}
 	}
 
-	// 如果无法获取时间范围或只有一张表，使用默认查询
-	if len(tables) <= 1 {
-		return s.DB.Model(&models.RequestLog{}).Scopes(s.logFiltersScope(c))
+	// 如果无法获取时间范围，使用默认查询（查询当天的表）
+	if len(tables) == 0 {
+		today := time.Now()
+		tables = []string{utils.GetDailyLogTableName(today)}
+	}
+
+	existingTables := s.getExistingLogTables(tables)
+
+	// 如果请求的是默认今天日志，但今天的表还不存在，返回空结果而不是数据库报错
+	if len(existingTables) == 0 {
+		return s.getEmptyLogsQuery().Scopes(s.logFiltersScope(c))
+	}
+
+	// 如果只有一张表，直接查询该表
+	if len(existingTables) == 1 {
+		return s.DB.Table(existingTables[0]).Scopes(s.logFiltersScope(c))
 	}
 
 	// 多表查询：构建 UNION ALL 查询
@@ -191,9 +223,9 @@ func (s *LogService) GetLogsQuery(c *gin.Context) *gorm.DB {
 		whereClause = strings.Join(whereConditions, " AND ")
 	}
 
-	unionSQL := s.buildUnionQuery(tables, whereClause)
+	unionSQL := s.buildUnionQuery(existingTables, whereClause)
 
-	// 使用 UNION ALL 查询所有表
+	// 使用 UNION ALL 查询所有已存在的表
 	return s.DB.Raw(unionSQL, args...)
 }
 

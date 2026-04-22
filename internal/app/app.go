@@ -32,6 +32,7 @@ type App struct {
 	settingsManager   *config.SystemSettingsManager
 	groupManager      *services.GroupManager
 	logCleanupService *services.LogCleanupService
+	logUploadService  *services.LogUploadService
 	requestLogService *services.RequestLogService
 	cronChecker       *keypool.CronChecker
 	keyPoolProvider   *keypool.KeyProvider
@@ -49,6 +50,7 @@ type AppParams struct {
 	SettingsManager   *config.SystemSettingsManager
 	GroupManager      *services.GroupManager
 	LogCleanupService *services.LogCleanupService
+	LogUploadService  *services.LogUploadService
 	RequestLogService *services.RequestLogService
 	CronChecker       *keypool.CronChecker
 	KeyPoolProvider   *keypool.KeyProvider
@@ -65,6 +67,7 @@ func NewApp(params AppParams) *App {
 		settingsManager:   params.SettingsManager,
 		groupManager:      params.GroupManager,
 		logCleanupService: params.LogCleanupService,
+		logUploadService:  params.LogUploadService,
 		requestLogService: params.RequestLogService,
 		cronChecker:       params.CronChecker,
 		keyPoolProvider:   params.KeyPoolProvider,
@@ -81,7 +84,7 @@ func (a *App) Start() error {
 		return fmt.Errorf("failed to initialize i18n: %w", err)
 	}
 	logrus.Info("i18n initialized successfully.")
-	
+
 	// Master 节点执行初始化
 	if a.configManager.IsMaster() {
 		logrus.Info("Starting as Master Node.")
@@ -125,6 +128,7 @@ func (a *App) Start() error {
 		// 仅 Master 节点启动的服务
 		a.requestLogService.Start()
 		a.logCleanupService.Start()
+		a.logUploadService.Start()
 		a.cronChecker.Start()
 	} else {
 		logrus.Info("Starting as Slave Node.")
@@ -191,6 +195,7 @@ func (a *App) Stop(ctx context.Context) {
 		stoppableServices = append(stoppableServices,
 			a.cronChecker.Stop,
 			a.logCleanupService.Stop,
+			a.logUploadService.Stop,
 			a.requestLogService.Stop,
 		)
 	}
