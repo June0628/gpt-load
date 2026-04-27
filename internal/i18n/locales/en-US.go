@@ -205,8 +205,10 @@ var MessagesEnUS = map[string]string{
 	"config.log_upload_webdav_url_desc":        "Complete URL of the WebDAV server.",
 	"config.log_upload_webdav_username":        "WebDAV Username",
 	"config.log_upload_webdav_username_desc":   "Authentication username for WebDAV server.",
-	"config.log_upload_webdav_password":        "WebDAV Password",
-	"config.log_upload_webdav_password_desc":   "Authentication password for WebDAV server.",
+	"config.log_upload_webdav_password":             "WebDAV Password",
+	"config.log_upload_webdav_password_desc":        "Authentication password for WebDAV server.",
+	"config.log_upload_delete_after_manual":          "Delete After Manual Upload",
+	"config.log_upload_delete_after_manual_desc":     "When enabled, the log table will be automatically deleted after a successful manual upload.",
 
 	// Internal error messages (for fmt.Errorf usage)
 	"error.upstreams_required":       "upstreams field is required",
@@ -231,6 +233,15 @@ var MessagesEnUS = map[string]string{
 
 	// Settings success message
 	"settings.update_success": "Settings updated successfully. Configuration will be reloaded in the background across all instances.",
+
+	// Log backup related
+	"log_backup.table_name_required": "Please specify the log table name to upload",
+	"log_backup.invalid_table_name":  "Invalid log table name format",
+	"log_backup.table_not_found":     "The specified log table does not exist",
+	"log_backup.upload_failed":       "Log upload failed",
+	"log_backup.upload_success":              "Log table uploaded successfully",
+	"log_backup.upload_and_delete_success":   "Log table uploaded and deleted successfully",
+	"log_backup.today_table_forbidden":       "Cannot operate on today's active log table",
 
 	// Sub-groups related
 	"success.sub_groups_added":         "Sub groups added successfully",

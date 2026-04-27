@@ -14,7 +14,7 @@ declare module "axios" {
 
 const http = axios.create({
   baseURL: "/api",
-  timeout: 60000,
+  timeout: 600000, // 10分钟，大表上传可能需要更长时间
   headers: { "Content-Type": "application/json" },
 });
 

@@ -167,6 +167,8 @@ func registerProtectedAPIRoutes(api *gin.RouterGroup, serverHandler *handler.Ser
 	{
 		settings.GET("", serverHandler.GetSettings)
 		settings.PUT("", serverHandler.UpdateSettings)
+		settings.GET("/log-tables", serverHandler.GetLogTables)
+		settings.POST("/log-tables/upload", serverHandler.ManualUploadLogTable)
 	}
 }
 

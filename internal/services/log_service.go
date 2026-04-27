@@ -23,19 +23,15 @@ type ExportableLogKey struct {
 	StatusCode int    `gorm:"column:status_code"`
 }
 
-// buildUnionQuery 构建跨表查询的 UNION ALL 语句
-func (s *LogService) buildUnionQuery(tables []string, whereClause string) string {
+// buildUnionSubQuery 构建跨表查询的 UNION ALL 子查询 SQL
+func (s *LogService) buildUnionSubQuery(tables []string) string {
 	if len(tables) == 0 {
 		return ""
 	}
 
 	var queryParts []string
 	for _, table := range tables {
-		part := fmt.Sprintf("SELECT * FROM %s", table)
-		if whereClause != "" {
-			part += " WHERE " + whereClause
-		}
-		queryParts = append(queryParts, part)
+		queryParts = append(queryParts, fmt.Sprintf("SELECT * FROM %s", table))
 	}
 
 	return strings.Join(queryParts, " UNION ALL ")
@@ -157,76 +153,10 @@ func (s *LogService) GetLogsQuery(c *gin.Context) *gorm.DB {
 		return s.DB.Table(existingTables[0]).Scopes(s.logFiltersScope(c))
 	}
 
-	// 多表查询：构建 UNION ALL 查询
-	// 构建 WHERE 子句和参数
-	var args []interface{}
-	whereConditions := []string{}
+	// 多表查询：将 UNION ALL 作为子查询，在外层通过 Scopes 统一添加过滤条件
+	unionSQL := s.buildUnionSubQuery(existingTables)
 
-	// 重新构建 WHERE 条件
-	if parentGroupName := c.Query("parent_group_name"); parentGroupName != "" {
-		whereConditions = append(whereConditions, "parent_group_name LIKE ?")
-		args = append(args, "%"+parentGroupName+"%")
-	}
-	if groupName := c.Query("group_name"); groupName != "" {
-		whereConditions = append(whereConditions, "group_name LIKE ?")
-		args = append(args, "%"+groupName+"%")
-	}
-	if keyValue := c.Query("key_value"); keyValue != "" {
-		keyHash := s.EncryptionSvc.Hash(keyValue)
-		whereConditions = append(whereConditions, "key_hash = ?")
-		args = append(args, keyHash)
-	}
-	if model := c.Query("model"); model != "" {
-		whereConditions = append(whereConditions, "model LIKE ?")
-		args = append(args, "%"+model+"%")
-	}
-	if isSuccessStr := c.Query("is_success"); isSuccessStr != "" {
-		if isSuccess, err := strconv.ParseBool(isSuccessStr); err == nil {
-			whereConditions = append(whereConditions, "is_success = ?")
-			args = append(args, isSuccess)
-		}
-	}
-	if requestType := c.Query("request_type"); requestType != "" {
-		whereConditions = append(whereConditions, "request_type = ?")
-		args = append(args, requestType)
-	}
-	if statusCodeStr := c.Query("status_code"); statusCodeStr != "" {
-		if statusCode, err := strconv.Atoi(statusCodeStr); err == nil {
-			whereConditions = append(whereConditions, "status_code = ?")
-			args = append(args, statusCode)
-		}
-	}
-	if sourceIP := c.Query("source_ip"); sourceIP != "" {
-		whereConditions = append(whereConditions, "source_ip = ?")
-		args = append(args, sourceIP)
-	}
-	if errorContains := c.Query("error_contains"); errorContains != "" {
-		whereConditions = append(whereConditions, "error_message LIKE ?")
-		args = append(args, "%"+errorContains+"%")
-	}
-	// 添加时间范围过滤条件
-	if startTimeStr != "" {
-		if startTime, err := time.Parse(time.RFC3339, startTimeStr); err == nil {
-			whereConditions = append(whereConditions, "timestamp >= ?")
-			args = append(args, startTime)
-		}
-	}
-	if endTimeStr != "" {
-		if endTime, err := time.Parse(time.RFC3339, endTimeStr); err == nil {
-			whereConditions = append(whereConditions, "timestamp <= ?")
-			args = append(args, endTime)
-		}
-	}
-
-	whereClause := ""
-	if len(whereConditions) > 0 {
-		whereClause = strings.Join(whereConditions, " AND ")
-	}
-
-	unionSQL := s.buildUnionQuery(existingTables, whereClause)
-
-	// 使用 UNION ALL 查询所有已存在的表
-	return s.DB.Raw(unionSQL, args...)
+	return s.DB.Table("(?) as combined_logs", gorm.Expr(unionSQL)).Scopes(s.logFiltersScope(c))
 }
 
 // StreamLogKeysToCSV fetches unique keys from logs based on filters and streams them as a CSV.

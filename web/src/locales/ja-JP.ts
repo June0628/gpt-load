@@ -571,6 +571,23 @@ export default {
     dangerZone: "危険ゾーン",
     clearAllData: "すべてのデータをクリア",
     confirmClearData: "この操作はすべてのデータを削除し、元に戻すことはできません。続行しますか？",
+    // ログ上傳関連
+    logUpload: "ログアップロード",
+    // 手動バックアップアップロード
+    logBackup: "ログ手動バックアップ",
+    logBackupDesc:
+      "ログテーブルを選択して、設定済みの外部ストレージに手動でバックアップアップロード",
+    selectTable: "ログテーブルを選択",
+    selectTablePlaceholder: "バックアップするログテーブルを選択してください",
+    uploadBackup: "バックアップをアップロード",
+    uploadAndDelete: "アップロードして削除",
+    uploading: "アップロード中...",
+    uploadSuccess: "ログテーブルのバックアップアップロードに成功しました",
+    uploadAndDeleteSuccess: "ログテーブルのバックアップアップロードに成功し、自動削除されました",
+    uploadFailed: "ログテーブルのバックアップアップロードに失敗しました",
+    autoDeleteEnabled: "アップロード後の自動削除が有効です",
+    noTables: "ログテーブルがありません",
+    rowsUnit: "件",
   },
   footer: {
     checking: "確認中...",

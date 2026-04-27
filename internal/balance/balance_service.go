@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
+	"gorm.io/datatypes"
 )
 
 // BalanceInfo 是 models.BalanceInfo 的别名，便于本包使用
@@ -58,8 +59,15 @@ func (s *BalanceService) QueryBalance(ctx context.Context, group *models.Group, 
 		return nil, fmt.Errorf("api key is nil")
 	}
 
-	// 解析上游 URL 获取域名
-	upstreamURL := group.EffectiveConfig.AppUrl
+	// 从分组的 Upstreams 配置中获取上游 URL（而非 AppUrl，AppUrl 是应用自身地址）
+	upstreamURL, err := getUpstreamURLFromGroup(group.Upstreams)
+	if err != nil {
+		return &BalanceInfo{
+			Success:      false,
+			ErrorMessage: fmt.Sprintf("failed to get upstream URL from group: %v", err),
+		}, nil
+	}
+
 	parsedURL, err := url.Parse(upstreamURL)
 	if err != nil {
 		return &BalanceInfo{
@@ -80,6 +88,39 @@ func (s *BalanceService) QueryBalance(ctx context.Context, group *models.Group, 
 	// 使用对应的处理器查询余额
 	customPath := group.BalanceQueryPath
 	return handler(ctx, upstreamURL, apiKey.KeyValue, customPath)
+}
+
+// getUpstreamURLFromGroup 从分组的 Upstreams JSON 配置中提取第一个有效的上游 URL
+func getUpstreamURLFromGroup(upstreams datatypes.JSON) (string, error) {
+	if len(upstreams) == 0 {
+		return "", fmt.Errorf("no upstreams configured")
+	}
+
+	type upstreamDef struct {
+		URL    string `json:"url"`
+		Weight int    `json:"weight"`
+	}
+
+	var defs []upstreamDef
+	if err := json.Unmarshal(upstreams, &defs); err != nil {
+		return "", fmt.Errorf("failed to unmarshal upstreams: %w", err)
+	}
+
+	// 优先选择 weight > 0 的上游
+	for _, def := range defs {
+		if def.Weight > 0 && def.URL != "" {
+			return def.URL, nil
+		}
+	}
+
+	// 如果没有 weight > 0 的，返回第一个有 URL 的
+	for _, def := range defs {
+		if def.URL != "" {
+			return def.URL, nil
+		}
+	}
+
+	return "", fmt.Errorf("no valid upstream URL found")
 }
 
 // handleDefaultBalance 默认余额查询处理器（尝试标准 OpenAI 格式）

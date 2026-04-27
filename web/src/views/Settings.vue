@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { settingsApi, type Setting, type SettingCategory } from "@/api/settings";
+import { settingsApi, type LogTableInfo, type Setting, type SettingCategory } from "@/api/settings";
 import ProxyKeysInput from "@/components/common/ProxyKeysInput.vue";
-import { HelpCircle, Save } from "@vicons/ionicons5";
+import { CloudUploadOutline, HelpCircle, Save } from "@vicons/ionicons5";
 import {
   NButton,
   NCard,
+  NEmpty,
   NForm,
   NFormItem,
   NGrid,
@@ -12,13 +13,15 @@ import {
   NIcon,
   NInput,
   NInputNumber,
+  NSelect,
   NSpace,
   NSwitch,
+  NText,
   NTooltip,
   useMessage,
   type FormItemRule,
 } from "naive-ui";
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
 
 const { t } = useI18n();
@@ -29,7 +32,25 @@ const form = ref<Record<string, string | number | boolean>>({});
 const isSaving = ref(false);
 const message = useMessage();
 
+// 手动备份上传相关
+const logTables = ref<LogTableInfo[]>([]);
+const selectedTable = ref<string | null>(null);
+const isUploading = ref(false);
+
+const logTableOptions = computed(() =>
+  logTables.value.map(table => ({
+    label: `${table.date}  (${table.row_count.toLocaleString()} ${t("settings.rowsUnit")})`,
+    value: table.table_name,
+  }))
+);
+
+const isLogUploadEnabled = computed(() => form.value["log_upload_enabled"] === true);
+const isDeleteAfterManualUpload = computed(
+  () => form.value["log_upload_delete_after_manual"] === true
+);
+
 fetchSettings();
+fetchLogTables();
 
 async function fetchSettings() {
   try {
@@ -38,6 +59,30 @@ async function fetchSettings() {
     initForm();
   } catch (_error) {
     message.error(t("settings.loadFailed"));
+  }
+}
+
+async function fetchLogTables() {
+  try {
+    logTables.value = await settingsApi.getLogTables();
+  } catch (_error) {
+    // silently fail - backup section will show empty
+  }
+}
+
+async function handleUploadBackup() {
+  if (!selectedTable.value || isUploading.value) {
+    return;
+  }
+  isUploading.value = true;
+  try {
+    await settingsApi.uploadLogTable(selectedTable.value);
+    selectedTable.value = null;
+    await fetchLogTables();
+  } catch (_error) {
+    // 错误提示已由 axios 响应拦截器处理，此处无需重复弹出
+  } finally {
+    isUploading.value = false;
   }
 }
 
@@ -63,6 +108,8 @@ async function handleSubmit() {
     isSaving.value = true;
     await settingsApi.updateSettings(form.value);
     await fetchSettings();
+  } catch (_error) {
+    // 表单验证失败或保存失败时，错误提示已由 axios 响应拦截器或 validate 处理
   } finally {
     isSaving.value = false;
   }
@@ -188,5 +235,51 @@ function generateValidationRules(item: Setting): FormItemRule[] {
         {{ isSaving ? t("settings.saving") : t("settings.saveSettings") }}
       </n-button>
     </div>
+
+    <!-- 手动备份上传 -->
+    <n-card
+      v-if="isLogUploadEnabled"
+      size="small"
+      :title="t('settings.logBackup')"
+      hoverable
+      bordered
+      style="margin-top: 16px"
+    >
+      <n-text depth="3" style="display: block; margin-bottom: 12px">
+        {{ t("settings.logBackupDesc") }}
+        <n-text v-if="isDeleteAfterManualUpload" type="warning" style="margin-left: 8px">
+          ⚠️ {{ t("settings.autoDeleteEnabled") }}
+        </n-text>
+      </n-text>
+      <n-space v-if="logTableOptions.length > 0" align="center">
+        <n-select
+          v-model:value="selectedTable"
+          :options="logTableOptions"
+          :placeholder="t('settings.selectTablePlaceholder')"
+          style="min-width: 320px"
+          size="small"
+          clearable
+        />
+        <n-button
+          :type="isDeleteAfterManualUpload ? 'warning' : 'primary'"
+          size="small"
+          :loading="isUploading"
+          :disabled="!selectedTable || isUploading"
+          @click="handleUploadBackup"
+        >
+          <template #icon>
+            <n-icon :component="CloudUploadOutline" />
+          </template>
+          {{
+            isUploading
+              ? t("settings.uploading")
+              : isDeleteAfterManualUpload
+                ? t("settings.uploadAndDelete")
+                : t("settings.uploadBackup")
+          }}
+        </n-button>
+      </n-space>
+      <n-empty v-else :description="t('settings.noTables')" size="small" />
+    </n-card>
   </n-space>
 </template>

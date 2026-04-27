@@ -3,10 +3,11 @@ package services
 import (
 	"context"
 	"fmt"
-	"gpt-load/internal/config"
-	"gpt-load/internal/utils"
 	"sync"
 	"time"
+
+	"gpt-load/internal/config"
+	"gpt-load/internal/utils"
 
 	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
@@ -16,15 +17,17 @@ import (
 type LogCleanupService struct {
 	db              *gorm.DB
 	settingsManager *config.SystemSettingsManager
+	uploadService   *LogUploadService
 	stopCh          chan struct{}
 	wg              sync.WaitGroup
 }
 
 // NewLogCleanupService 创建新的日志清理服务
-func NewLogCleanupService(db *gorm.DB, settingsManager *config.SystemSettingsManager) *LogCleanupService {
+func NewLogCleanupService(db *gorm.DB, settingsManager *config.SystemSettingsManager, uploadService *LogUploadService) *LogCleanupService {
 	return &LogCleanupService{
 		db:              db,
 		settingsManager: settingsManager,
+		uploadService:   uploadService,
 		stopCh:          make(chan struct{}),
 	}
 }
@@ -88,30 +91,40 @@ func (s *LogCleanupService) cleanupExpiredLogs() {
 	// 计算过期时间点
 	cutoffDate := time.Now().AddDate(0, 0, -retentionDays)
 
-	// 获取需要删除的日期范围内的所有表
-	// 我们删除 cutoffDate 之前的所有表
-	veryOldDate := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
-	tablesToDelete := utils.GetLogTablesForDateRange(veryOldDate, cutoffDate.AddDate(0, 0, -1))
+	// 从数据库中查询实际存在的过期日志表，避免枚举大量不存在的表名
+	tablesToDelete := utils.GetExistingExpiredLogTables(s.db, cutoffDate)
 
 	if len(tablesToDelete) == 0 {
 		logrus.Debug("No old log tables to cleanup")
 		return
 	}
 
+	// 检查是否需要在删除前上传
+	needUploadBeforeDelete := settings.LogUploadEnabled && settings.LogUploadBeforeDelete
+
+	var failedTables []string
+	var failedErrors []string
+
 	dialect := s.db.Dialector.Name()
 	deletedCount := 0
 
 	for _, tableName := range tablesToDelete {
-		// 检查表是否存在
-		if !s.tableExists(tableName) {
-			continue
-		}
-
-		// 统计表中的记录数
+		// 统计表中的记录数（用于日志输出）
 		var count int64
 		if err := s.db.Table(tableName).Count(&count).Error; err != nil {
 			logrus.WithError(err).WithField("table", tableName).Debug("Failed to count records in table")
 			continue
+		}
+
+		// 如果启用了删除前上传，先执行上传
+		if needUploadBeforeDelete {
+			if err := s.uploadService.UploadTable(tableName); err != nil {
+				logrus.WithError(err).WithField("table", tableName).Error("Failed to upload table before deletion, skipping deletion to prevent data loss")
+				failedTables = append(failedTables, tableName)
+				failedErrors = append(failedErrors, err.Error())
+				continue // 上传失败则跳过该表的删除，防止数据丢失
+			}
+			logrus.WithField("table", tableName).Info("Successfully uploaded table before deletion")
 		}
 
 		// 删除表
@@ -142,9 +155,40 @@ func (s *LogCleanupService) cleanupExpiredLogs() {
 			"retention_days": retentionDays,
 		}).Info("Successfully cleaned up old log tables")
 	}
+
+	// 如果有上传失败的表，通过飞书 Webhook 发送通知
+	if len(failedTables) > 0 {
+		s.sendUploadFailureNotification(failedTables, failedErrors)
+	}
 }
 
-// tableExists 检查表是否存在
-func (s *LogCleanupService) tableExists(tableName string) bool {
-	return s.db.Migrator().HasTable(tableName)
+// sendUploadFailureNotification 发送日志上传失败的飞书 Webhook 通知
+func (s *LogCleanupService) sendUploadFailureNotification(failedTables []string, failedErrors []string) {
+	settings := s.settingsManager.GetSettings()
+	webhookURL := settings.FeishuWebhookURL
+
+	if webhookURL == "" {
+		logrus.Warn("Log upload failed but Feishu webhook URL is not configured, cannot send notification")
+		return
+	}
+
+	title := "⚠️ GPT-Load 日志上传失败通知"
+
+	// 构建消息内容
+	content := fmt.Sprintf("**日志上传失败，过期表无法被删除**\n\n"+
+		"已配置 LogUploadEnabled=true 且 LogUploadBeforeDelete=true，但上传失败导致以下 %d 个过期日志表未被清理：\n\n", len(failedTables))
+
+	for i, table := range failedTables {
+		errMsg := ""
+		if i < len(failedErrors) {
+			errMsg = failedErrors[i]
+		}
+		content += fmt.Sprintf("- **%s**\n  错误: `%s`\n", table, errMsg)
+	}
+
+	content += "\n请检查 WebDAV/COS 配置是否正确（URL、密码等），否则这些过期表将永远无法被自动删除。"
+
+	if err := utils.SendFeishuWebhook(webhookURL, title, content); err != nil {
+		logrus.WithError(err).Error("Failed to send log upload failure notification via Feishu webhook")
+	}
 }

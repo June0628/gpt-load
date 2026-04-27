@@ -8,6 +8,7 @@ import (
 	app_errors "gpt-load/internal/errors"
 	"gpt-load/internal/models"
 	"gpt-load/internal/store"
+	"gpt-load/internal/utils"
 	"math/rand"
 	"strconv"
 	"strings"
@@ -230,10 +231,57 @@ func (p *KeyProvider) handleFailure(apiKey *models.APIKey, group *models.Group, 
 			if err := p.store.HSet(keyHashKey, map[string]any{"status": models.KeyStatusInvalid}); err != nil {
 				return fmt.Errorf("failed to update key status to invalid in store: %w", err)
 			}
+
+			// 检查有效密钥数量是否低于阈值，发送飞书通知
+			p.checkAndNotifyLowKeyCount(group, activeKeysListKey)
 		}
 
 		return nil
 	})
+}
+
+// checkAndNotifyLowKeyCount 检查分组有效密钥数量是否低于阈值，如果是则发送飞书 Webhook 通知
+func (p *KeyProvider) checkAndNotifyLowKeyCount(group *models.Group, activeKeysListKey string) {
+	threshold := group.EffectiveConfig.InvalidKeyCountThreshold
+	if threshold <= 0 {
+		return
+	}
+
+	webhookURL := p.settingsManager.GetSettings().FeishuWebhookURL
+	if webhookURL == "" {
+		return
+	}
+
+	activeCount, err := p.store.LLen(activeKeysListKey)
+	if err != nil {
+		logrus.WithError(err).WithField("groupID", group.ID).Error("Failed to get active key count for threshold check")
+		return
+	}
+
+	if activeCount < int64(threshold) {
+		groupName := group.Name
+		if group.DisplayName != "" {
+			groupName = group.DisplayName
+		}
+
+		title := "⚠️ 密钥数量不足告警"
+		content := fmt.Sprintf("**分组**: %s\n**当前有效密钥数**: %d\n**告警阈值**: %d\n\n请及时补充密钥，避免服务中断。",
+			groupName, activeCount, threshold)
+
+		if err := utils.SendFeishuWebhook(webhookURL, title, content); err != nil {
+			logrus.WithError(err).WithFields(logrus.Fields{
+				"groupID":     group.ID,
+				"activeCount": activeCount,
+				"threshold":   threshold,
+			}).Error("Failed to send low key count notification via Feishu webhook")
+		} else {
+			logrus.WithFields(logrus.Fields{
+				"groupID":     group.ID,
+				"activeCount": activeCount,
+				"threshold":   threshold,
+			}).Info("Sent low key count notification via Feishu webhook")
+		}
+	}
 }
 
 // LoadKeysFromDB 从数据库加载所有分组和密钥，并填充到 Store 中。

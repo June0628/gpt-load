@@ -29,4 +29,18 @@ export const settingsApi = {
     const response = await http.get("/channel-types");
     return response.data || [];
   },
+  async getLogTables(): Promise<LogTableInfo[]> {
+    const response = await http.get("/settings/log-tables");
+    return response.data || [];
+  },
+  async uploadLogTable(tableName: string): Promise<{ message?: string }> {
+    const response = await http.post("/settings/log-tables/upload", { table_name: tableName });
+    return response as any;
+  },
 };
+
+export interface LogTableInfo {
+  table_name: string;
+  date: string;
+  row_count: number;
+}

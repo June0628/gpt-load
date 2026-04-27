@@ -205,8 +205,10 @@ var MessagesZhCN = map[string]string{
 	"config.log_upload_webdav_url_desc":        "WebDAV 服务器的完整 URL 地址。",
 	"config.log_upload_webdav_username":        "WebDAV 用户名",
 	"config.log_upload_webdav_username_desc":   "WebDAV 服务器的认证用户名。",
-	"config.log_upload_webdav_password":        "WebDAV 密码",
-	"config.log_upload_webdav_password_desc":   "WebDAV 服务器的认证密码。",
+	"config.log_upload_webdav_password":             "WebDAV 密码",
+	"config.log_upload_webdav_password_desc":        "WebDAV 服务器的认证密码。",
+	"config.log_upload_delete_after_manual":          "手动上传后自动删除",
+	"config.log_upload_delete_after_manual_desc":     "启用后，手动上传日志表成功后将自动删除该日志表。",
 
 	// Internal error messages (for fmt.Errorf usage)
 	"error.upstreams_required":       "upstreams字段是必需的",
@@ -231,6 +233,15 @@ var MessagesZhCN = map[string]string{
 
 	// Settings success message
 	"settings.update_success": "设置更新成功。配置将在后台在所有实例间重新加载。",
+
+	// Log backup related
+	"log_backup.table_name_required": "请指定要上传的日志表名",
+	"log_backup.invalid_table_name":  "无效的日志表名格式",
+	"log_backup.table_not_found":     "指定的日志表不存在",
+	"log_backup.upload_failed":          "日志上传失败",
+	"log_backup.upload_success":              "日志表上传成功",
+	"log_backup.upload_and_delete_success":   "日志表上传成功，已自动删除",
+	"log_backup.today_table_forbidden":       "不能操作当天正在写入的日志表",
 
 	// Sub-groups related
 	"success.sub_groups_added":         "子分组添加成功",

@@ -205,8 +205,10 @@ var MessagesJaJP = map[string]string{
 	"config.log_upload_webdav_url_desc":        "WebDAV サーバーの完全な URL。",
 	"config.log_upload_webdav_username":        "WebDAV ユーザー名",
 	"config.log_upload_webdav_username_desc":   "WebDAV サーバーの認証ユーザー名。",
-	"config.log_upload_webdav_password":        "WebDAV パスワード",
-	"config.log_upload_webdav_password_desc":   "WebDAV サーバーの認証パスワード。",
+	"config.log_upload_webdav_password":             "WebDAV パスワード",
+	"config.log_upload_webdav_password_desc":        "WebDAV サーバーの認証パスワード。",
+	"config.log_upload_delete_after_manual":          "手動アップロード後に自動削除",
+	"config.log_upload_delete_after_manual_desc":     "有効にすると、手動アップロードが成功した後にログテーブルが自動的に削除されます。",
 
 	// Internal error messages (for fmt.Errorf usage)
 	"error.upstreams_required":       "upstreamsフィールドは必須です",
@@ -231,6 +233,15 @@ var MessagesJaJP = map[string]string{
 
 	// Settings success message
 	"settings.update_success": "設定が正常に更新されました。設定はすべてのインスタンスでバックグラウンドで再読み込みされます。",
+
+	// Log backup related
+	"log_backup.table_name_required": "アップロードするログテーブル名を指定してください",
+	"log_backup.invalid_table_name":  "無効なログテーブル名の形式です",
+	"log_backup.table_not_found":     "指定されたログテーブルが存在しません",
+	"log_backup.upload_failed":       "ログアップロードに失敗しました",
+	"log_backup.upload_success":              "ログテーブルのアップロードに成功しました",
+	"log_backup.upload_and_delete_success":   "ログテーブルのアップロードに成功し、自動削除されました",
+	"log_backup.today_table_forbidden":       "本日書き込み中のログテーブルは操作できません",
 
 	// Sub-groups related
 	"success.sub_groups_added":         "サブグループが正常に追加されました",

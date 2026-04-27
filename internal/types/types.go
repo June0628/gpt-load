@@ -39,6 +39,7 @@ type SystemSettings struct {
 	LogUploadWebDAVURL             string `json:"log_upload_webdav_url" name:"config.log_upload_webdav_url" category:"config.category.log_upload" desc:"config.log_upload_webdav_url_desc"`
 	LogUploadWebDAVUsername        string `json:"log_upload_webdav_username" name:"config.log_upload_webdav_username" category:"config.category.log_upload" desc:"config.log_upload_webdav_username_desc"`
 	LogUploadWebDAVPassword        string `json:"log_upload_webdav_password" name:"config.log_upload_webdav_password" category:"config.category.log_upload" desc:"config.log_upload_webdav_password_desc"`
+	LogUploadDeleteAfterManual     bool   `json:"log_upload_delete_after_manual" default:"false" name:"config.log_upload_delete_after_manual" category:"config.category.log_upload" desc:"config.log_upload_delete_after_manual_desc"`
 
 	// 请求设置
 	RequestTimeout        int    `json:"request_timeout" default:"600" name:"config.request_timeout" category:"config.category.request" desc:"config.request_timeout_desc" validate:"required,min=1"`
@@ -55,6 +56,9 @@ type SystemSettings struct {
 	KeyValidationIntervalMinutes int `json:"key_validation_interval_minutes" default:"60" name:"config.key_validation_interval" category:"config.category.key" desc:"config.key_validation_interval_desc" validate:"required,min=1"`
 	KeyValidationConcurrency     int `json:"key_validation_concurrency" default:"10" name:"config.key_validation_concurrency" category:"config.category.key" desc:"config.key_validation_concurrency_desc" validate:"required,min=1"`
 	KeyValidationTimeoutSeconds  int `json:"key_validation_timeout_seconds" default:"20" name:"config.key_validation_timeout" category:"config.category.key" desc:"config.key_validation_timeout_desc" validate:"required,min=1"`
+
+	// 通知配置
+	InvalidKeyCountThreshold int `json:"invalid_key_count_threshold" default:"0" name:"config.invalid_key_count_threshold" category:"config.category.key" desc:"config.invalid_key_count_threshold_desc" validate:"min=0"`
 
 	// For cache
 	ProxyKeysMap map[string]struct{} `json:"-"`
