@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/sirupsen/logrus"
 )
 
 // LogResponse defines the structure for log entries in the API response
@@ -24,24 +23,23 @@ func (s *Server) GetLogs(c *gin.Context) {
 
 	var logs []models.RequestLog
 	query = query.Order("timestamp desc")
-	pagination, err := response.Paginate(c, query, &logs)
+
+	// 默认跳过 COUNT 查询，避免跨多表时 COUNT(*) 开销大
+	// 前端不传时间范围时走无限滚动模式
+	enableCount := c.Query("enable_count") == "true"
+	pagination, err := response.Paginate(c, query, &logs, enableCount)
 	if err != nil {
 		response.Error(c, app_errors.ParseDBError(err))
 		return
 	}
 
-	// 解密所有日志中的密钥用于前端显示
+	// 批量解密所有日志中的密钥，比逐条解密效率更高
+	// 将切片转换为指针切片
+	logPtrs := make([]*models.RequestLog, len(logs))
 	for i := range logs {
-		if logs[i].KeyValue != "" {
-			decryptedValue, err := s.EncryptionSvc.Decrypt(logs[i].KeyValue)
-			if err != nil {
-				logrus.WithError(err).WithField("log_id", logs[i].ID).Error("Failed to decrypt log key value")
-				logs[i].KeyValue = "failed-to-decrypt"
-			} else {
-				logs[i].KeyValue = decryptedValue
-			}
-		}
+		logPtrs[i] = &logs[i]
 	}
+	s.LogService.BatchDecryptLogs(logPtrs)
 
 	pagination.Items = logs
 	response.Success(c, pagination)

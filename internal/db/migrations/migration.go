@@ -31,7 +31,12 @@ func MigrateDatabase(db *gorm.DB) error {
 	}
 
 	// Run v1.5.0 migration
-	return V1_5_0_AddBalanceQueryConfig(db)
+	if err := V1_5_0_AddBalanceQueryConfig(db); err != nil {
+		return err
+	}
+
+	// Run v1.6.0 migration
+	return V1_6_0_AddLogIndexes(db)
 }
 
 // HandleLegacyIndexes removes old indexes from previous versions to prevent migration errors

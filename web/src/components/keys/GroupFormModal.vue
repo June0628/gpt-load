@@ -313,6 +313,10 @@ function resetForm() {
     header_rules: [],
     proxy_keys: "",
     group_type: "standard",
+    balance_query_config: {
+      enabled: false,
+      aggregate_balance: false,
+    },
   });
 
   // 重置用户修改状态追踪

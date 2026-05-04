@@ -104,7 +104,7 @@ func (s *Server) CreateGroup(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, s.newGroupResponse(group))
+	response.Success(c, s.newGroupResponse(c, group))
 }
 
 // ListGroups handles listing all groups.
@@ -116,7 +116,7 @@ func (s *Server) ListGroups(c *gin.Context) {
 
 	groupResponses := make([]GroupResponse, 0, len(groups))
 	for i := range groups {
-		groupResponses = append(groupResponses, *s.newGroupResponse(&groups[i]))
+		groupResponses = append(groupResponses, *s.newGroupResponse(c, &groups[i]))
 	}
 
 	response.Success(c, groupResponses)
@@ -236,7 +236,7 @@ func (s *Server) UpdateGroup(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, s.newGroupResponse(group))
+	response.Success(c, s.newGroupResponse(c, group))
 }
 
 // ReorderGroups handles batch reorder updates for groups.
@@ -272,33 +272,108 @@ type BalanceQueryConfigResponse struct {
 	AggregateBalance bool `json:"aggregate_balance"`
 }
 
+// GroupBalanceInfoResponse defines the balance info structure for API response.
+type GroupBalanceInfoResponse struct {
+	TotalKeys     int64  `json:"total_keys"`
+	SuccessCount  int64  `json:"success_count"`
+	FailCount     int64  `json:"fail_count"`
+	TotalBalance  string `json:"total_balance"`
+	TotalUsed     string `json:"total_used"`
+	Currency      string `json:"currency"`
+	LastUpdatedAt string `json:"last_updated_at,omitempty"`
+}
+
 // GroupResponse defines the structure for a group response, excluding sensitive or large fields.
 type GroupResponse struct {
-	ID                  uint                       `json:"id"`
-	Name                string                     `json:"name"`
-	Endpoint            string                     `json:"endpoint"`
-	DisplayName         string                     `json:"display_name"`
-	Description         string                     `json:"description"`
-	GroupType           string                     `json:"group_type"`
-	Upstreams           datatypes.JSON             `json:"upstreams"`
-	ChannelType         string                     `json:"channel_type"`
-	Sort                int                        `json:"sort"`
-	TestModel           string                     `json:"test_model"`
-	ValidationEndpoint  string                     `json:"validation_endpoint"`
-	ParamOverrides      datatypes.JSONMap          `json:"param_overrides"`
-	ModelRedirectRules  datatypes.JSONMap          `json:"model_redirect_rules"`
-	ModelRedirectStrict bool                       `json:"model_redirect_strict"`
-	Config              datatypes.JSONMap          `json:"config"`
-	HeaderRules         []models.HeaderRule        `json:"header_rules"`
-	ProxyKeys           string                     `json:"proxy_keys"`
+	ID                  uint                        `json:"id"`
+	Name                string                      `json:"name"`
+	Endpoint            string                      `json:"endpoint"`
+	DisplayName         string                      `json:"display_name"`
+	Description         string                      `json:"description"`
+	GroupType           string                      `json:"group_type"`
+	Upstreams           datatypes.JSON              `json:"upstreams"`
+	ChannelType         string                      `json:"channel_type"`
+	Sort                int                         `json:"sort"`
+	TestModel           string                      `json:"test_model"`
+	ValidationEndpoint  string                      `json:"validation_endpoint"`
+	ParamOverrides      datatypes.JSONMap           `json:"param_overrides"`
+	ModelRedirectRules  datatypes.JSONMap           `json:"model_redirect_rules"`
+	ModelRedirectStrict bool                        `json:"model_redirect_strict"`
+	Config              datatypes.JSONMap           `json:"config"`
+	HeaderRules         []models.HeaderRule         `json:"header_rules"`
+	ProxyKeys           string                      `json:"proxy_keys"`
 	BalanceQueryConfig  *BalanceQueryConfigResponse `json:"balance_query_config"`
-	LastValidatedAt     *time.Time                 `json:"last_validated_at"`
-	CreatedAt           time.Time                  `json:"created_at"`
-	UpdatedAt           time.Time                  `json:"updated_at"`
+	BalanceInfo         *GroupBalanceInfoResponse   `json:"balance_info,omitempty"`
+	LastValidatedAt     *time.Time                  `json:"last_validated_at"`
+	CreatedAt           time.Time                   `json:"created_at"`
+	UpdatedAt           time.Time                   `json:"updated_at"`
+}
+
+// aggregateGroupBalance aggregates balance info from API keys for a group
+func (s *Server) aggregateGroupBalance(ctx *gin.Context, group *models.Group) *GroupBalanceInfoResponse {
+	if group.GroupType == "aggregate" {
+		return nil
+	}
+
+	var apiKeys []models.APIKey
+	if err := s.DB.WithContext(ctx.Request.Context()).Where("group_id = ?", group.ID).Find(&apiKeys).Error; err != nil {
+		logrus.WithContext(ctx.Request.Context()).WithError(err).Error("Failed to fetch API keys for balance aggregation")
+		return nil
+	}
+
+	if len(apiKeys) == 0 {
+		return nil
+	}
+
+	var totalBalance float64
+	var totalUsed float64
+	var currency string
+	var successCount int64
+	var failCount int64
+	var lastUpdatedAt string
+
+	for _, key := range apiKeys {
+		if key.BalanceTotal != "" && key.BalanceTotal != "N/A" {
+			if balance, err := strconv.ParseFloat(key.BalanceTotal, 64); err == nil {
+				totalBalance += balance
+			}
+			successCount++
+		} else {
+			failCount++
+		}
+		if key.BalanceUsed != "" && key.BalanceUsed != "N/A" {
+			if used, err := strconv.ParseFloat(key.BalanceUsed, 64); err == nil {
+				totalUsed += used
+			}
+		}
+	}
+
+	if successCount == 0 && failCount == 0 {
+		return nil
+	}
+
+	// Find the most recent updated key
+	for _, key := range apiKeys {
+		if key.UpdatedAt.After(time.Time{}) {
+			if lastUpdatedAt == "" || key.UpdatedAt.Format(time.RFC3339) > lastUpdatedAt {
+				lastUpdatedAt = key.UpdatedAt.Format(time.RFC3339)
+			}
+		}
+	}
+
+	return &GroupBalanceInfoResponse{
+		TotalKeys:     int64(len(apiKeys)),
+		SuccessCount:  successCount,
+		FailCount:     failCount,
+		TotalBalance:  strconv.FormatFloat(totalBalance, 'f', 2, 64),
+		TotalUsed:     strconv.FormatFloat(totalUsed, 'f', 2, 64),
+		Currency:      currency,
+		LastUpdatedAt: lastUpdatedAt,
+	}
 }
 
 // newGroupResponse creates a new GroupResponse from a models.Group.
-func (s *Server) newGroupResponse(group *models.Group) *GroupResponse {
+func (s *Server) newGroupResponse(ctx *gin.Context, group *models.Group) *GroupResponse {
 	appURL := s.SettingsManager.GetAppUrl()
 	endpoint := ""
 	if appURL != "" {
@@ -316,6 +391,12 @@ func (s *Server) newGroupResponse(group *models.Group) *GroupResponse {
 			logrus.WithError(err).Error("Failed to unmarshal header rules")
 			headerRules = make([]models.HeaderRule, 0)
 		}
+	}
+
+	// Aggregate balance info if balance query is enabled
+	var balanceInfo *GroupBalanceInfoResponse
+	if group.EnableBalanceQuery {
+		balanceInfo = s.aggregateGroupBalance(ctx, group)
 	}
 
 	return &GroupResponse{
@@ -336,13 +417,14 @@ func (s *Server) newGroupResponse(group *models.Group) *GroupResponse {
 		Config:              group.Config,
 		HeaderRules:         headerRules,
 		ProxyKeys:           group.ProxyKeys,
-		BalanceQueryConfig:  &BalanceQueryConfigResponse{
+		BalanceQueryConfig: &BalanceQueryConfigResponse{
 			Enabled:          group.EnableBalanceQuery,
 			AggregateBalance: group.AggregateBalance,
 		},
-		LastValidatedAt:     group.LastValidatedAt,
-		CreatedAt:           group.CreatedAt,
-		UpdatedAt:           group.UpdatedAt,
+		BalanceInfo:     balanceInfo,
+		LastValidatedAt: group.LastValidatedAt,
+		CreatedAt:       group.CreatedAt,
+		UpdatedAt:       group.UpdatedAt,
 	}
 }
 
@@ -443,7 +525,7 @@ func (s *Server) CopyGroup(c *gin.Context) {
 		return
 	}
 
-	groupResponse := s.newGroupResponse(newGroup)
+	groupResponse := s.newGroupResponse(c, newGroup)
 	copyResponse := &GroupCopyResponse{
 		Group: groupResponse,
 	}

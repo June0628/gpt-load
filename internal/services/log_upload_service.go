@@ -46,7 +46,7 @@ func (s *LogUploadService) Stop(ctx context.Context) {
 	logrus.Info("Log upload service stopped.")
 }
 
-// UploadTable 将指定日志表导出为 CSV 并上传到外部存储
+// UploadTable 将指定日志表导出为 CSV 并流式上传到外部存储
 // 由 LogCleanupService 在删除表之前调用
 func (s *LogUploadService) UploadTable(tableName string) error {
 	s.mu.Lock()
@@ -84,6 +84,7 @@ func (s *LogUploadService) UploadAndDeleteTable(tableName string) error {
 }
 
 // uploadTableLocked 内部实现，调用者需持有 s.mu 锁
+// 使用流式上传，不再生成临时文件
 func (s *LogUploadService) uploadTableLocked(tableName string) error {
 	settings := s.settingsManager.GetSettings()
 
@@ -91,15 +92,13 @@ func (s *LogUploadService) uploadTableLocked(tableName string) error {
 		return fmt.Errorf("log upload is not enabled")
 	}
 
-	// 导出表数据为 CSV 临时文件（流式写入，避免大表 OOM）
-	tmpFile, rowCount, err := s.exportTableToCSVFile(tableName)
-	if err != nil {
-		return fmt.Errorf("failed to export table to CSV: %w", err)
+	// 先检查表是否有数据
+	var count int64
+	if err := s.db.Table(tableName).Count(&count).Error; err != nil {
+		return fmt.Errorf("failed to count table %s: %w", tableName, err)
 	}
-	// 确保临时文件在上传完成后被清理
-	defer os.Remove(tmpFile)
 
-	if rowCount == 0 {
+	if count == 0 {
 		logrus.WithField("table", tableName).Info("Table is empty, skipping upload")
 		return nil
 	}
@@ -107,46 +106,36 @@ func (s *LogUploadService) uploadTableLocked(tableName string) error {
 	// 生成文件名
 	filename := s.generateFilename(tableName, settings)
 
-	// 根据提供商选择上传方式
+	// 根据提供商选择上传方式（流式上传）
 	provider := strings.ToLower(settings.LogUploadProvider)
 	switch provider {
 	case "tencent", "cos", "tencent_cos":
-		return s.uploadFileToTencentCOS(tmpFile, filename, settings)
+		return s.uploadTableToTencentCOSStream(tableName, filename, settings)
 	case "webdav":
-		return s.uploadFileToWebDAV(tmpFile, filename, settings)
+		return s.uploadTableToWebDAVStream(tableName, filename, settings)
 	default:
 		return fmt.Errorf("unknown upload provider: %s", provider)
 	}
 }
 
-// exportTableToCSVFile 将表数据流式导出为 CSV 临时文件，返回临时文件路径和行数
-// 使用临时文件而非内存缓冲，避免大表导致 OOM
-func (s *LogUploadService) exportTableToCSVFile(tableName string) (string, int, error) {
+// exportTableToCSVStream 将表数据流式导出为 CSV，通过回调函数逐行处理
+// 避免将整个 CSV 保存在内存或临时文件中
+// 包含所有字段（包括 request_body 和 agent_files）
+func (s *LogUploadService) exportTableToCSVStream(tableName string, onRow func([]string) error) (int, error) {
 	rows, err := s.db.Table(tableName).Rows()
 	if err != nil {
-		return "", 0, fmt.Errorf("failed to query table %s: %w", tableName, err)
+		return 0, fmt.Errorf("failed to query table %s: %w", tableName, err)
 	}
 	defer rows.Close()
 
 	columns, err := rows.Columns()
 	if err != nil {
-		return "", 0, fmt.Errorf("failed to get columns for table %s: %w", tableName, err)
+		return 0, fmt.Errorf("failed to get columns for table %s: %w", tableName, err)
 	}
 
-	// 创建临时文件
-	tmpFile, err := os.CreateTemp("", "gpt-load-csv-*.csv")
-	if err != nil {
-		return "", 0, fmt.Errorf("failed to create temp file: %w", err)
-	}
-	tmpPath := tmpFile.Name()
-
-	// 使用 CSV writer 直接写入临时文件
-	writer := csv.NewWriter(tmpFile)
-
-	if err := writer.Write(columns); err != nil {
-		tmpFile.Close()
-		os.Remove(tmpPath)
-		return "", 0, fmt.Errorf("failed to write CSV header: %w", err)
+	// 写入表头（包含所有字段）
+	if err := onRow(columns); err != nil {
+		return 0, fmt.Errorf("failed to write CSV header: %w", err)
 	}
 
 	values := make([]interface{}, len(columns))
@@ -158,9 +147,7 @@ func (s *LogUploadService) exportTableToCSVFile(tableName string) (string, int, 
 	rowCount := 0
 	for rows.Next() {
 		if err := rows.Scan(valuePtrs...); err != nil {
-			tmpFile.Close()
-			os.Remove(tmpPath)
-			return "", 0, fmt.Errorf("failed to scan row: %w", err)
+			return 0, fmt.Errorf("failed to scan row: %w", err)
 		}
 
 		record := make([]string, len(columns))
@@ -179,18 +166,46 @@ func (s *LogUploadService) exportTableToCSVFile(tableName string) (string, int, 
 			}
 		}
 
-		if err := writer.Write(record); err != nil {
-			tmpFile.Close()
-			os.Remove(tmpPath)
-			return "", 0, fmt.Errorf("failed to write CSV row: %w", err)
+		if err := onRow(record); err != nil {
+			return 0, fmt.Errorf("failed to write CSV row: %w", err)
 		}
 		rowCount++
 	}
 
 	if err := rows.Err(); err != nil {
+		return 0, fmt.Errorf("rows iteration error: %w", err)
+	}
+
+	logrus.WithFields(logrus.Fields{
+		"table":     tableName,
+		"row_count": rowCount,
+		"col_count": len(columns),
+	}).Debug("Streamed table to CSV (all fields including large fields)")
+
+	return rowCount, nil
+}
+
+// exportTableToCSVFile 将表数据流式导出为 CSV 临时文件，返回临时文件路径和行数
+// 保留此方法用于兼容 UploadFileNow 功能
+func (s *LogUploadService) exportTableToCSVFile(tableName string) (string, int, error) {
+	// 创建临时文件
+	tmpFile, err := os.CreateTemp("", "gpt-load-csv-*.csv")
+	if err != nil {
+		return "", 0, fmt.Errorf("failed to create temp file: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+
+	writer := csv.NewWriter(tmpFile)
+	rowCount := 0
+
+	// 使用流式导出
+	_, err = s.exportTableToCSVStream(tableName, func(row []string) error {
+		return writer.Write(row)
+	})
+	if err != nil {
 		tmpFile.Close()
 		os.Remove(tmpPath)
-		return "", 0, fmt.Errorf("rows iteration error: %w", err)
+		return "", 0, err
 	}
 
 	writer.Flush()
@@ -239,7 +254,152 @@ func (s *LogUploadService) generateFilename(tableName string, settings types.Sys
 // 腾讯云 COS 上传（使用正确的 HMAC-SHA1 签名算法）
 // ============================================================
 
-// uploadFileToTencentCOS 从文件流式上传到腾讯云 COS
+// uploadTableToTencentCOSStream 流式上传表数据到腾讯云 COS，不生成临时文件
+// 如果流式上传失败，会自动降级到基于临时文件的上传
+func (s *LogUploadService) uploadTableToTencentCOSStream(tableName, objectKey string, settings types.SystemSettings) error {
+	secretID := settings.LogUploadTencentSecretID
+	secretKey := settings.LogUploadTencentSecretKey
+	bucket := settings.LogUploadTencentBucket
+	region := settings.LogUploadTencentRegion
+
+	if secretID == "" || secretKey == "" || bucket == "" {
+		return fmt.Errorf("tencent COS credentials not configured")
+	}
+
+	// 创建 pipe 用于流式传输
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		// pipe 创建失败，直接使用临时文件方式
+		logrus.WithError(err).Warn("Failed to create pipe, falling back to temp file upload")
+		return s.uploadTableToTencentCOSWithTempFile(tableName, objectKey, settings)
+	}
+	defer reader.Close()
+
+	host := fmt.Sprintf("%s.cos.%s.myqcloud.com", bucket, region)
+	encodedKey := encodeObjectKey(objectKey)
+	endpoint := fmt.Sprintf("https://%s/%s", host, encodedKey)
+
+	// 创建上传请求，使用 pipe reader 作为请求体
+	req, err := http.NewRequest("PUT", endpoint, reader)
+	if err != nil {
+		return fmt.Errorf("failed to create COS upload request: %w", err)
+	}
+
+	// 使用 chunked transfer encoding，流式上传不需要预先知道 Content-Length
+	req.Header.Set("Host", host)
+	req.Header.Set("Content-Type", "text/csv")
+	req.Header.Set("Transfer-Encoding", "chunked")
+
+	// 签名中使用编码后的路径
+	authorization := s.cosAuthorization(secretID, secretKey, "put", "/"+encodedKey, host)
+	req.Header.Set("Authorization", authorization)
+
+	// 在 goroutine 中写入 CSV 数据到 pipe
+	writeDone := make(chan error, 1)
+	go func() {
+		defer writer.Close()
+
+		csvWriter := csv.NewWriter(writer)
+		rowCount := 0
+
+		// 流式导出到 pipe
+		_, err = s.exportTableToCSVStream(tableName, func(row []string) error {
+			if err := csvWriter.Write(row); err != nil {
+				return err
+			}
+			rowCount++
+
+			// 每 10000 行刷新一次缓冲区
+			if rowCount%10000 == 0 {
+				csvWriter.Flush()
+				if err := csvWriter.Error(); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+
+		if err != nil {
+			writeDone <- fmt.Errorf("failed to export table to CSV: %w", err)
+			return
+		}
+
+		csvWriter.Flush()
+		if err := csvWriter.Error(); err != nil {
+			writeDone <- fmt.Errorf("CSV writer flush error: %w", err)
+			return
+		}
+
+		logrus.WithFields(logrus.Fields{
+			"table":     tableName,
+			"row_count": rowCount,
+			"object_key": objectKey,
+		}).Info("Finished streaming CSV data to COS")
+		writeDone <- nil
+	}()
+
+	// 执行上传请求
+	client := &http.Client{Timeout: 60 * time.Minute}
+	resp, err := client.Do(req)
+	if err != nil {
+		// 上传失败，尝试降级方案
+		<-writeDone // 等待 writer goroutine 结束
+		logrus.WithError(err).Warn("Streamed upload failed, falling back to temp file upload")
+		return s.uploadTableToTencentCOSWithTempFile(tableName, objectKey, settings)
+	}
+	defer resp.Body.Close()
+
+	// 等待写入完成
+	writeErr := <-writeDone
+	if writeErr != nil {
+		// 写入失败，也尝试降级
+		logrus.WithError(writeErr).Warn("CSV export failed, falling back to temp file upload")
+		return s.uploadTableToTencentCOSWithTempFile(tableName, objectKey, settings)
+	}
+
+	if resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		errMsg := fmt.Errorf("COS upload failed with status %d: %s", resp.StatusCode, string(body))
+		// 上传失败，尝试降级方案
+		logrus.WithError(errMsg).Warn("COS upload failed, falling back to temp file upload")
+		return s.uploadTableToTencentCOSWithTempFile(tableName, objectKey, settings)
+	}
+
+	logrus.WithField("object_key", objectKey).Info("Successfully uploaded to Tencent COS (streamed)")
+	return nil
+}
+
+// uploadTableToTencentCOSWithTempFile 使用临时文件方式上传到腾讯云 COS（后备方案）
+func (s *LogUploadService) uploadTableToTencentCOSWithTempFile(tableName, objectKey string, settings types.SystemSettings) error {
+	logrus.WithField("table", tableName).Info("Using temp file fallback for COS upload (may take longer for large tables)")
+
+	// 生成临时 CSV 文件
+	tmpFile, rowCount, err := s.exportTableToCSVFile(tableName)
+	if err != nil {
+		return fmt.Errorf("failed to export table to CSV: %w", err)
+	}
+	defer os.Remove(tmpFile)
+
+	if rowCount == 0 {
+		logrus.WithField("table", tableName).Info("Table is empty, skipping upload")
+		return nil
+	}
+
+	logrus.WithFields(logrus.Fields{
+		"table":     tableName,
+		"row_count": rowCount,
+		"tmp_file":  tmpFile,
+	}).Info("Exported to temp file, starting upload")
+
+	// 上传到 COS
+	if err := s.uploadFileToTencentCOS(tmpFile, objectKey, settings); err != nil {
+		return fmt.Errorf("temp file upload also failed: %w", err)
+	}
+
+	return nil
+}
+
+// uploadFileToTencentCOS 从文件流式上传到腾讯云 COS（保留用于 UploadFileNow）
 func (s *LogUploadService) uploadFileToTencentCOS(filePath, objectKey string, settings types.SystemSettings) error {
 	secretID := settings.LogUploadTencentSecretID
 	secretKey := settings.LogUploadTencentSecretKey
@@ -346,6 +506,159 @@ func sha1Hex(data string) string {
 // ============================================================
 // WebDAV 上传
 // ============================================================
+
+// uploadTableToWebDAVStream 流式上传表数据到 WebDAV 服务器，不生成临时文件
+// 如果流式上传失败，会自动降级到基于临时文件的上传
+func (s *LogUploadService) uploadTableToWebDAVStream(tableName, filename string, settings types.SystemSettings) error {
+	baseURL := settings.LogUploadWebDAVURL
+	username := settings.LogUploadWebDAVUsername
+	password := settings.LogUploadWebDAVPassword
+
+	if baseURL == "" {
+		return fmt.Errorf("webdav URL not configured")
+	}
+
+	if !strings.HasSuffix(baseURL, "/") {
+		baseURL += "/"
+	}
+
+	client := &http.Client{Timeout: 60 * time.Minute}
+
+	// 确保中间目录存在（使用 MKCOL 逐级创建）
+	dir := dirFromPath(filename)
+	if dir != "" && dir != "." {
+		if err := s.webdavMkcolRecursive(client, baseURL, dir, username, password); err != nil {
+			return fmt.Errorf("failed to create WebDAV directories: %w", err)
+		}
+	}
+
+	// 创建 pipe 用于流式传输
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		// pipe 创建失败，直接使用临时文件方式
+		logrus.WithError(err).Warn("Failed to create pipe, falling back to temp file upload")
+		return s.uploadTableToWebDAVWithTempFile(tableName, filename, settings)
+	}
+	defer reader.Close()
+
+	uploadURL := baseURL + filename
+
+	req, err := http.NewRequest("PUT", uploadURL, reader)
+	if err != nil {
+		return fmt.Errorf("failed to create WebDAV upload request: %w", err)
+	}
+
+	// 使用 chunked transfer encoding
+	req.Header.Set("Content-Type", "text/csv")
+	req.Header.Set("Transfer-Encoding", "chunked")
+
+	if username != "" || password != "" {
+		req.SetBasicAuth(username, password)
+	}
+
+	// 在 goroutine 中写入 CSV 数据到 pipe
+	writeDone := make(chan error, 1)
+	go func() {
+		defer writer.Close()
+
+		csvWriter := csv.NewWriter(writer)
+		rowCount := 0
+
+		// 流式导出到 pipe
+		_, err = s.exportTableToCSVStream(tableName, func(row []string) error {
+			if err := csvWriter.Write(row); err != nil {
+				return err
+			}
+			rowCount++
+
+			// 每 10000 行刷新一次缓冲区
+			if rowCount%10000 == 0 {
+				csvWriter.Flush()
+				if err := csvWriter.Error(); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+
+		if err != nil {
+			writeDone <- fmt.Errorf("failed to export table to CSV: %w", err)
+			return
+		}
+
+		csvWriter.Flush()
+		if err := csvWriter.Error(); err != nil {
+			writeDone <- fmt.Errorf("CSV writer flush error: %w", err)
+			return
+		}
+
+		logrus.WithFields(logrus.Fields{
+			"table":     tableName,
+			"row_count": rowCount,
+			"url":       uploadURL,
+		}).Info("Finished streaming CSV data to WebDAV")
+		writeDone <- nil
+	}()
+
+	// 执行上传请求
+	resp, err := client.Do(req)
+	if err != nil {
+		// 上传失败，尝试降级方案
+		<-writeDone // 等待 writer goroutine 结束
+		logrus.WithError(err).Warn("WebDAV streamed upload failed, falling back to temp file upload")
+		return s.uploadTableToWebDAVWithTempFile(tableName, filename, settings)
+	}
+	defer resp.Body.Close()
+
+	// 等待写入完成
+	writeErr := <-writeDone
+	if writeErr != nil {
+		// 写入失败，也尝试降级
+		logrus.WithError(writeErr).Warn("CSV export failed, falling back to temp file upload")
+		return s.uploadTableToWebDAVWithTempFile(tableName, filename, settings)
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		errMsg := fmt.Errorf("WebDAV upload failed with status %d: %s", resp.StatusCode, string(body))
+		// 上传失败，尝试降级方案
+		logrus.WithError(errMsg).Warn("WebDAV upload failed, falling back to temp file upload")
+		return s.uploadTableToWebDAVWithTempFile(tableName, filename, settings)
+	}
+
+	logrus.WithField("url", uploadURL).Info("Successfully uploaded to WebDAV (streamed)")
+	return nil
+}
+
+// uploadTableToWebDAVWithTempFile 使用临时文件方式上传到 WebDAV 服务器（后备方案）
+func (s *LogUploadService) uploadTableToWebDAVWithTempFile(tableName, filename string, settings types.SystemSettings) error {
+	logrus.WithField("table", tableName).Info("Using temp file fallback for WebDAV upload (may take longer for large tables)")
+
+	// 生成临时 CSV 文件
+	tmpFile, rowCount, err := s.exportTableToCSVFile(tableName)
+	if err != nil {
+		return fmt.Errorf("failed to export table to CSV: %w", err)
+	}
+	defer os.Remove(tmpFile)
+
+	if rowCount == 0 {
+		logrus.WithField("table", tableName).Info("Table is empty, skipping upload")
+		return nil
+	}
+
+	logrus.WithFields(logrus.Fields{
+		"table":     tableName,
+		"row_count": rowCount,
+		"tmp_file":  tmpFile,
+	}).Info("Exported to temp file, starting upload")
+
+	// 上传到 WebDAV
+	if err := s.uploadFileToWebDAV(tmpFile, filename, settings); err != nil {
+		return fmt.Errorf("temp file upload also failed: %w", err)
+	}
+
+	return nil
+}
 
 // uploadFileToWebDAV 从文件流式上传到 WebDAV 服务器
 func (s *LogUploadService) uploadFileToWebDAV(filePath, filename string, settings types.SystemSettings) error {

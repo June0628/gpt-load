@@ -241,6 +241,7 @@ func (p *KeyProvider) handleFailure(apiKey *models.APIKey, group *models.Group, 
 }
 
 // checkAndNotifyLowKeyCount 检查分组有效密钥数量是否低于阈值，如果是则发送飞书 Webhook 通知
+// 实现通知节流机制，每个分组有冷却时间，避免短时间内重复发送通知
 func (p *KeyProvider) checkAndNotifyLowKeyCount(group *models.Group, activeKeysListKey string) {
 	threshold := group.EffectiveConfig.InvalidKeyCountThreshold
 	if threshold <= 0 {
@@ -259,6 +260,22 @@ func (p *KeyProvider) checkAndNotifyLowKeyCount(group *models.Group, activeKeysL
 	}
 
 	if activeCount < int64(threshold) {
+		// 检查是否处于冷却期，实现通知节流
+		cooldownKey := fmt.Sprintf("notify:group:%d:low_keys_cooldown", group.ID)
+		cooldownDuration := 5 * time.Minute
+
+		// 使用 SetNX 尝试设置冷却标记，如果成功说明之前没有设置或已过期
+		set, err := p.store.SetNX(cooldownKey, []byte("1"), cooldownDuration)
+		if err != nil {
+			logrus.WithError(err).WithField("groupID", group.ID).Error("Failed to check notification cooldown")
+			return
+		}
+
+		// 如果 set 为 false，说明冷却标记已存在，跳过本次通知
+		if !set {
+			return
+		}
+
 		groupName := group.Name
 		if group.DisplayName != "" {
 			groupName = group.DisplayName
@@ -679,12 +696,15 @@ func (p *KeyProvider) removeKeyFromStore(keyID, groupID uint) error {
 // apiKeyToMap converts an APIKey model to a map for HSET.
 func (p *KeyProvider) apiKeyToMap(key *models.APIKey) map[string]any {
 	return map[string]any{
-		"id":            fmt.Sprint(key.ID),
-		"key_string":    key.KeyValue,
-		"status":        key.Status,
-		"failure_count": key.FailureCount,
-		"group_id":      key.GroupID,
-		"created_at":    key.CreatedAt.Unix(),
+		"id":             fmt.Sprint(key.ID),
+		"key_string":     key.KeyValue,
+		"status":         key.Status,
+		"failure_count":  key.FailureCount,
+		"group_id":       key.GroupID,
+		"created_at":     key.CreatedAt.Unix(),
+		"balance_total":  key.BalanceTotal,
+		"balance_used":   key.BalanceUsed,
+		"balance_status": key.BalanceStatus,
 	}
 }
 

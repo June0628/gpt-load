@@ -16,6 +16,7 @@ import (
 type Service interface {
 	Encrypt(plaintext string) (string, error)
 	Decrypt(ciphertext string) (string, error)
+	BatchDecrypt(ciphertexts []string) map[string]string
 	Hash(plaintext string) string
 }
 
@@ -59,7 +60,12 @@ func (s *aesService) Encrypt(plaintext string) (string, error) {
 	return hex.EncodeToString(ciphertext), nil
 }
 
+// Decrypt decrypts a single ciphertext string
 func (s *aesService) Decrypt(ciphertext string) (string, error) {
+	if ciphertext == "" {
+		return "", nil
+	}
+
 	data, err := hex.DecodeString(ciphertext)
 	if err != nil {
 		return "", fmt.Errorf("invalid hex data: %w", err)
@@ -77,6 +83,35 @@ func (s *aesService) Decrypt(ciphertext string) (string, error) {
 	}
 
 	return string(plaintext), nil
+}
+
+// BatchDecrypt decrypts multiple ciphertexts efficiently
+// Returns a map of ciphertext -> plaintext, skipping empty strings and duplicates
+func (s *aesService) BatchDecrypt(ciphertexts []string) map[string]string {
+	// Deduplicate inputs
+	seen := make(map[string]struct{}, len(ciphertexts))
+	var uniqueCiphertexts []string
+	for _, ct := range ciphertexts {
+		if ct == "" {
+			continue
+		}
+		if _, exists := seen[ct]; !exists {
+			seen[ct] = struct{}{}
+			uniqueCiphertexts = append(uniqueCiphertexts, ct)
+		}
+	}
+
+	results := make(map[string]string, len(uniqueCiphertexts))
+	for _, ct := range uniqueCiphertexts {
+		plaintext, err := s.Decrypt(ct)
+		if err != nil {
+			results[ct] = "failed-to-decrypt"
+		} else {
+			results[ct] = plaintext
+		}
+	}
+
+	return results
 }
 
 // Hash generates a hash of the plaintext using HMAC-SHA256
@@ -98,6 +133,22 @@ func (s *noopService) Encrypt(plaintext string) (string, error) {
 
 func (s *noopService) Decrypt(ciphertext string) (string, error) {
 	return ciphertext, nil
+}
+
+// BatchDecrypt for noopService - returns identity map for unique inputs
+func (s *noopService) BatchDecrypt(ciphertexts []string) map[string]string {
+	seen := make(map[string]struct{}, len(ciphertexts))
+	results := make(map[string]string, len(ciphertexts))
+	for _, ct := range ciphertexts {
+		if ct == "" {
+			continue
+		}
+		if _, exists := seen[ct]; !exists {
+			seen[ct] = struct{}{}
+			results[ct] = ct
+		}
+	}
+	return results
 }
 
 // Hash generates a hash of the plaintext using SHA256 (no key)

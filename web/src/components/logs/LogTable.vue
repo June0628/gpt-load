@@ -405,20 +405,10 @@ const scrollX = computed(() => {
   return visibleColumns.reduce((total, col) => total + (col.width || 100), 0);
 });
 
-// 设置默认时间范围：今天 00:00 到 当前时间+1小时
-const setDefaultTimeRange = () => {
-  const now = new Date();
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
-  const endOfToday = new Date(now.getTime() + 60 * 60 * 1000); // 当前时间 + 1小时
-
-  filters.start_time = startOfToday.getTime();
-  filters.end_time = endOfToday.getTime();
-};
-
 // Lifecycle and Watchers
 onMounted(() => {
   loadColumnPreferences();
-  setDefaultTimeRange();
+  // 不再默认设置时间范围，避免跨多表查询时 COUNT(*) 开销大
   loadLogs();
 });
 watch([currentPage, pageSize], loadLogs);

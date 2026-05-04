@@ -32,12 +32,19 @@ func GetDailyLogTableName(date time.Time) string {
 // GetLogTablesForDateRange 获取指定日期范围内所有日志表名
 func GetLogTablesForDateRange(startTime, endTime time.Time) []string {
 	var tables []string
-	current := startTime.Truncate(24 * time.Hour)
-	end := endTime.Truncate(24 * time.Hour)
+	// 使用本地日期来正确获取每一天的起始时间
+	// time.Truncate(24 * time.Hour) 会基于 UTC 截断，导致使用非本地时区的日期
+	// 使用 time.Date() 创建本地日期 00:00:00 的时间，确保正确处理跨时区情况
+	startY, startM, startD := startTime.Date()
+	endY, endM, endD := endTime.Date()
+	loc := startTime.Location()
+
+	current := time.Date(startY, startM, startD, 0, 0, 0, 0, loc)
+	end := time.Date(endY, endM, endD, 0, 0, 0, 0, loc)
 
 	for !current.After(end) {
 		tables = append(tables, GetDailyLogTableName(current))
-		current = current.Add(24 * time.Hour)
+		current = current.AddDate(0, 0, 1)
 	}
 
 	return tables

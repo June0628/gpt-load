@@ -5,7 +5,7 @@
   "description": "GPT Load Balancer Frontend - A modern Vue 3 frontend for GPT load balancing service",
   "type": "module",
   "keywords": ["vue3", "typescript", "vite", "naive-ui", "gpt-load", "frontend"],
-  "author": "tbphp",
+  "author": "June",
   "license": "MIT",
   "repository": {
     "type": "git",
