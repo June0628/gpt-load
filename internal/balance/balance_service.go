@@ -25,12 +25,26 @@ type BalanceService struct {
 	HTTPClient *http.Client
 }
 
+// 全局 HTTP Client，支持连接池复用和超时设置
+var defaultHTTPClient *http.Client
+
+func init() {
+	transport := &http.Transport{
+		MaxIdleConns:        100,
+		MaxIdleConnsPerHost: 10,
+		IdleConnTimeout:     90 * time.Second,
+	}
+	defaultHTTPClient = &http.Client{
+		Timeout:   30 * time.Second,
+		Transport: transport,
+	}
+}
+
 // NewBalanceService 创建新的余额查询服务
+// 使用自定义 HTTP Client，支持连接池复用和超时设置
 func NewBalanceService() *BalanceService {
 	return &BalanceService{
-		HTTPClient: &http.Client{
-			Timeout: 10 * time.Second,
-		},
+		HTTPClient: defaultHTTPClient,
 	}
 }
 
@@ -76,7 +90,8 @@ func (s *BalanceService) QueryBalance(ctx context.Context, group *models.Group, 
 		}, nil
 	}
 
-	host := parsedURL.Host
+	// 只使用 host 部分（不含端口），避免因端口不同导致匹配失败
+	host := parsedURL.Hostname()
 
 	// 查找对应的处理器
 	handler, ok := platformHandlers[host]
@@ -144,7 +159,7 @@ func handleDefaultBalance(ctx context.Context, baseURL string, apiKey string, cu
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := defaultHTTPClient.Do(req)
 	if err != nil {
 		return &BalanceInfo{
 			Success:      false,
@@ -215,7 +230,7 @@ func handleOpenAIBalance(ctx context.Context, baseURL string, apiKey string, cus
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := defaultHTTPClient.Do(req)
 	if err != nil {
 		return &BalanceInfo{
 			Success:      false,
@@ -278,7 +293,7 @@ func handleSiliconFlowBalance(ctx context.Context, baseURL string, apiKey string
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := defaultHTTPClient.Do(req)
 	if err != nil {
 		return &BalanceInfo{
 			Success:      false,
@@ -287,6 +302,14 @@ func handleSiliconFlowBalance(ctx context.Context, baseURL string, apiKey string
 	}
 	defer resp.Body.Close()
 
+	// 检查 HTTP 状态码
+	if resp.StatusCode == http.StatusUnauthorized {
+		return &BalanceInfo{
+			Success:      false,
+			ErrorMessage: "Key 无效 (401)",
+		}, nil
+	}
+
 	if resp.StatusCode != http.StatusOK {
 		return &BalanceInfo{
 			Success:      false,
@@ -294,16 +317,15 @@ func handleSiliconFlowBalance(ctx context.Context, baseURL string, apiKey string
 		}, nil
 	}
 
+	// 解析响应，字段为字符串类型
 	var result struct {
-		Code    int    `json:"code"`
-		Message string `json:"message"`
-		Data    struct {
-			ID             string  `json:"id"`
-			Balance        float64 `json:"balance"`
-			Status         string  `json:"status"`
-			CreditBalance  float64 `json:"creditBalance"`
-			CashBalance    float64 `json:"cashBalance"`
-		} `json:"data"`
+		Success       bool   `json:"success"`
+		Name          string `json:"name"`
+		Email         string `json:"email"`
+		Balance       string `json:"balance"`
+		ChargeBalance string `json:"chargeBalance"`
+		TotalBalance  string `json:"totalBalance"`
+		Status        string `json:"status"`
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
@@ -313,25 +335,31 @@ func handleSiliconFlowBalance(ctx context.Context, baseURL string, apiKey string
 		}, nil
 	}
 
-	if result.Code != 0 {
+	if !result.Success {
 		return &BalanceInfo{
 			Success:      false,
-			ErrorMessage: result.Message,
+			ErrorMessage: "API 返回 success=false",
 		}, nil
 	}
 
-	balanceTotal := fmt.Sprintf("%.2f", result.Data.Balance)
-	if result.Data.CreditBalance > 0 || result.Data.CashBalance > 0 {
-		balanceTotal = fmt.Sprintf("%.2f", result.Data.CreditBalance+result.Data.CashBalance)
+	// 处理余额值，确保显示正确的格式
+	balanceTotal := result.TotalBalance
+	if balanceTotal == "" {
+		balanceTotal = "0"
+	}
+
+	// 状态默认值
+	status := result.Status
+	if status == "" {
+		status = "unknown"
 	}
 
 	return &BalanceInfo{
 		Success:      true,
 		BalanceTotal: balanceTotal,
 		BalanceUsed:  "N/A",
-		Status:       result.Data.Status,
-		ID:           result.Data.ID,
 		Currency:     "CNY",
+		Status:       status,
 	}, nil
 }
 
@@ -351,7 +379,7 @@ func handleChatAnywhereBalance(ctx context.Context, baseURL string, apiKey strin
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := defaultHTTPClient.Do(req)
 	if err != nil {
 		return &BalanceInfo{
 			Success:      false,
@@ -368,12 +396,12 @@ func handleChatAnywhereBalance(ctx context.Context, baseURL string, apiKey strin
 	}
 
 	var result struct {
-		AdminKeyId   string      `json:"adminKeyId"`
-		ApiKey       string      `json:"apiKey"`
-		BalanceTotal interface{} `json:"balanceTotal"`
-		BalanceUsed  interface{} `json:"balanceUsed"`
-		ID           string      `json:"id"`
-		Status       string      `json:"status"`
+		AdminKeyId   string `json:"adminKeyId"`
+		ApiKey       string `json:"apiKey"`
+		BalanceTotal string `json:"balanceTotal"`
+		BalanceUsed  string `json:"balanceUsed"`
+		ID           string `json:"id"`
+		Status       string `json:"status"`
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
@@ -383,22 +411,40 @@ func handleChatAnywhereBalance(ctx context.Context, baseURL string, apiKey strin
 		}, nil
 	}
 
-	balanceTotal := fmt.Sprintf("%v", result.BalanceTotal)
-	balanceUsed := fmt.Sprintf("%v", result.BalanceUsed)
-	if result.BalanceTotal == nil {
+	// 处理空值
+	balanceTotal := result.BalanceTotal
+	if balanceTotal == "" {
 		balanceTotal = "N/A"
 	}
-	if result.BalanceUsed == nil {
+
+	balanceUsed := result.BalanceUsed
+	if balanceUsed == "" {
 		balanceUsed = "N/A"
+	}
+
+	// 设置默认值
+	status := result.Status
+	if status == "" {
+		status = "N/A"
+	}
+
+	id := result.ID
+	if id == "" {
+		id = "N/A"
+	}
+
+	adminKeyID := result.AdminKeyId
+	if adminKeyID == "" {
+		adminKeyID = "N/A"
 	}
 
 	return &BalanceInfo{
 		Success:      true,
 		BalanceTotal: balanceTotal,
 		BalanceUsed:  balanceUsed,
-		Status:       result.Status,
-		ID:           result.ID,
-		AdminKeyID:   result.AdminKeyId,
+		Status:       status,
+		ID:           id,
+		AdminKeyID:   adminKeyID,
 		Currency:     "USD",
 	}, nil
 }
@@ -423,7 +469,7 @@ func handleDeepSeekBalance(ctx context.Context, baseURL string, apiKey string, c
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := defaultHTTPClient.Do(req)
 	if err != nil {
 		return &BalanceInfo{
 			Success:      false,
@@ -489,7 +535,7 @@ func handleMoonshotBalance(ctx context.Context, baseURL string, apiKey string, c
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := defaultHTTPClient.Do(req)
 	if err != nil {
 		return &BalanceInfo{
 			Success:      false,
@@ -554,7 +600,7 @@ func handleBaichuanBalance(ctx context.Context, baseURL string, apiKey string, c
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := defaultHTTPClient.Do(req)
 	if err != nil {
 		return &BalanceInfo{
 			Success:      false,
@@ -624,7 +670,7 @@ func handleMiniMaxBalance(ctx context.Context, baseURL string, apiKey string, cu
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := defaultHTTPClient.Do(req)
 	if err != nil {
 		return &BalanceInfo{
 			Success:      false,
@@ -685,7 +731,7 @@ func handleZhipuBalance(ctx context.Context, baseURL string, apiKey string, cust
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := defaultHTTPClient.Do(req)
 	if err != nil {
 		return &BalanceInfo{
 			Success:      false,
@@ -763,7 +809,7 @@ func handleDashScopeBalance(ctx context.Context, baseURL string, apiKey string, 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-DashScope-SPL", "enable")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := defaultHTTPClient.Do(req)
 	if err != nil {
 		return &BalanceInfo{
 			Success:      false,

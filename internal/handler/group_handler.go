@@ -352,11 +352,18 @@ func (s *Server) aggregateGroupBalance(ctx *gin.Context, group *models.Group) *G
 		return nil
 	}
 
-	// Find the most recent updated key
+	// Find the most recent updated key and its currency
 	for _, key := range apiKeys {
-		if key.UpdatedAt.After(time.Time{}) {
+		// Only consider keys with non-zero UpdatedAt (has been queried before)
+		if !key.UpdatedAt.IsZero() {
 			if lastUpdatedAt == "" || key.UpdatedAt.Format(time.RFC3339) > lastUpdatedAt {
 				lastUpdatedAt = key.UpdatedAt.Format(time.RFC3339)
+			}
+			// Get currency from successfully queried keys
+			if currency == "" && key.BalanceTotal != "" && key.BalanceTotal != "N/A" {
+				// Try to infer currency based on balance format or known patterns
+				// For now, we'll set a default that can be enhanced later
+				currency = s.inferCurrencyFromKey(key)
 			}
 		}
 	}
@@ -479,7 +486,13 @@ func (s *Server) GetGroupConfigOptions(c *gin.Context) {
 	response.Success(c, translated)
 }
 
-// calculateRequestStats is a helper to compute request statistics.
+// inferCurrencyFromKey attempts to infer the currency based on key or group information
+func (s *Server) inferCurrencyFromKey(key models.APIKey) string {
+	// Default currency is USD, can be enhanced based on platform detection
+	// The actual currency should come from the balance query response
+	return "USD"
+}
+
 func (s *Server) GetGroupStats(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
