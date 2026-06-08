@@ -6,15 +6,26 @@ import (
 	"gorm.io/gorm"
 )
 
+// GroupV170 用于迁移的临时结构体
+type GroupV170 struct {
+	KeyNeverExpires   bool `gorm:"column:key_never_expires"`
+	DailyRequestLimit int  `gorm:"column:daily_request_limit"`
+}
+
 // V1_7_0_AddKeyExpirationConfig 添加密钥失效配置相关字段
 func V1_7_0_AddKeyExpirationConfig(db *gorm.DB) error {
-	// 添加分组配置字段
-	if err := db.Exec(`
-		ALTER TABLE groups
-		ADD COLUMN IF NOT EXISTS key_never_expires BOOLEAN NOT NULL DEFAULT FALSE,
-		ADD COLUMN IF NOT EXISTS daily_request_limit INT NOT NULL DEFAULT 0
-	`).Error; err != nil {
-		return err
+	// 添加 key_never_expires 字段（使用 GORM Migrator，兼容 MySQL/SQLite/PostgreSQL）
+	if !db.Migrator().HasColumn(&GroupV170{}, "key_never_expires") {
+		if err := db.Migrator().AddColumn(&GroupV170{}, "key_never_expires"); err != nil {
+			return err
+		}
+	}
+
+	// 添加 daily_request_limit 字段
+	if !db.Migrator().HasColumn(&GroupV170{}, "daily_request_limit") {
+		if err := db.Migrator().AddColumn(&GroupV170{}, "daily_request_limit"); err != nil {
+			return err
+		}
 	}
 
 	// 添加密钥每日请求计数表
