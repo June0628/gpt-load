@@ -102,6 +102,8 @@ type GroupCreateParams struct {
 	ProxyKeys           string
 	SubGroups           []SubGroupInput
 	BalanceQueryConfig  *BalanceQueryConfigParams
+	KeyNeverExpires     bool
+	DailyRequestLimit   int
 }
 
 // BalanceQueryConfigParams captures balance query configuration for a group.
@@ -131,6 +133,8 @@ type GroupUpdateParams struct {
 	ProxyKeys           *string
 	SubGroups           *[]SubGroupInput
 	BalanceQueryConfig  *BalanceQueryConfigParams
+	KeyNeverExpires     *bool
+	DailyRequestLimit   *int
 }
 
 // GroupReorderItem captures a group ID and target sort value.
@@ -261,6 +265,10 @@ func (s *GroupService) CreateGroup(ctx context.Context, params GroupCreateParams
 		group.EnableBalanceQuery = params.BalanceQueryConfig.Enabled
 		group.AggregateBalance = params.BalanceQueryConfig.AggregateBalance
 	}
+
+	// 设置密钥失效配置
+	group.KeyNeverExpires = params.KeyNeverExpires
+	group.DailyRequestLimit = params.DailyRequestLimit
 
 	tx := s.db.WithContext(ctx).Begin()
 	if err := tx.Error; err != nil {
@@ -500,6 +508,14 @@ func (s *GroupService) UpdateGroup(ctx context.Context, id uint, params GroupUpd
 	if params.BalanceQueryConfig != nil {
 		group.EnableBalanceQuery = params.BalanceQueryConfig.Enabled
 		group.AggregateBalance = params.BalanceQueryConfig.AggregateBalance
+	}
+
+	// 更新密钥失效配置
+	if params.KeyNeverExpires != nil {
+		group.KeyNeverExpires = *params.KeyNeverExpires
+	}
+	if params.DailyRequestLimit != nil {
+		group.DailyRequestLimit = *params.DailyRequestLimit
 	}
 
 	if err := tx.Save(&group).Error; err != nil {

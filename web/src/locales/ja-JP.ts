@@ -450,6 +450,18 @@ export default {
     aggregateBalanceDescription: "有効にすると、グループカードに集計された総残高を表示",
     balanceLastUpdated: "最終更新",
     balanceQueryFailed: "照会失敗",
+    // キー失効設定
+    keyExpirationConfig: "キー失効設定",
+    keyExpirationConfigTooltip: "キーの失効戦略を設定し、キーがいつ使用できなくなるかを制御します",
+    keyNeverExpires: "キーを失効させない",
+    keyNeverExpiresTooltip:
+      "有効にすると、このグループのキーが検証失敗等原因で無効とみなされることはありません",
+    keyNeverExpiresDescription: "キーは検証失敗等原因で無効にされません",
+    dailyRequestLimit: "日次リクエスト制限",
+    dailyRequestLimitTooltip: "キーごとの1日の最大リクエスト数を設定、0は無制限を意味します",
+    dailyRequestLimitPlaceholder: "1日あたりのリクエスト数（0=無制限）",
+    dailyRequestLimitDescription:
+      "キーごとの1日の最大リクエスト数、0は無制限。日次制限を使い果たすとキーは無効になります",
   },
   subGroups: {
     addSubGroup: "サブグループを追加",

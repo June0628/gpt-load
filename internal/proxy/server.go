@@ -134,6 +134,19 @@ func (ps *ProxyServer) executeRequestWithRetry(
 		return
 	}
 
+	// 检查密钥是否已达到每日请求限制
+	if ps.keyProvider.CheckDailyRequestLimit(apiKey, group) {
+		// 密钥已达每日限制，递归重试选择下一个密钥
+		if retryCount < cfg.MaxRetries {
+			ps.executeRequestWithRetry(c, channelHandler, originalGroup, group, bodyBytes, isStream, startTime, retryCount+1)
+		} else {
+			logrus.Errorf("All keys in group %s have reached daily request limit", group.Name)
+			response.Error(c, app_errors.NewAPIError(app_errors.ErrNoKeysAvailable, "所有密钥已达到每日请求限制"))
+			ps.logRequest(c, originalGroup, group, nil, startTime, http.StatusServiceUnavailable, errors.New("daily request limit reached"), isStream, "", channelHandler, bodyBytes, models.RequestTypeFinal)
+		}
+		return
+	}
+
 	upstreamURL, err := channelHandler.BuildUpstreamURL(c.Request.URL, originalGroup.Name)
 	if err != nil {
 		response.Error(c, app_errors.NewAPIError(app_errors.ErrInternalServer, fmt.Sprintf("Failed to build upstream URL: %v", err)))
@@ -263,6 +276,9 @@ func (ps *ProxyServer) executeRequestWithRetry(
 
 	// ps.keyProvider.UpdateStatus(apiKey, group, true) // 请求成功不再重置成功次数，减少IO消耗
 	logrus.Debugf("Request for group %s succeeded on attempt %d with key %s", group.Name, retryCount+1, utils.MaskAPIKey(apiKey.KeyValue))
+
+	// 增加每日请求计数
+	ps.keyProvider.IncrementDailyRequestCount(apiKey, group)
 
 	// Check if this is a model list request (needs special handling)
 	if shouldInterceptModelList(c.Request.URL.Path, c.Request.Method) {

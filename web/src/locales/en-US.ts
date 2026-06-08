@@ -453,6 +453,20 @@ export default {
       "When enabled, will display aggregated total balance on the group card",
     balanceLastUpdated: "Last Updated",
     balanceQueryFailed: "Query failed",
+    // Key expiration config
+    keyExpirationConfig: "Key Expiration Config",
+    keyExpirationConfigTooltip:
+      "Configure key expiration strategy, control when keys become unavailable",
+    keyNeverExpires: "Key Never Expires",
+    keyNeverExpiresTooltip:
+      "When enabled, keys in this group will never be marked as invalid due to validation failures",
+    keyNeverExpiresDescription: "Keys will not be disabled due to validation failures",
+    dailyRequestLimit: "Daily Request Limit",
+    dailyRequestLimitTooltip:
+      "Set the maximum number of requests per key per day, 0 means unlimited",
+    dailyRequestLimitPlaceholder: "Requests per day (0=unlimited)",
+    dailyRequestLimitDescription:
+      "Maximum requests per key per day, 0 means unlimited. Keys will be disabled when daily limit is exhausted",
   },
   subGroups: {
     addSubGroup: "Add Sub Group",

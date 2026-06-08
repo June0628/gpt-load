@@ -83,6 +83,8 @@ interface GroupFormData {
     enabled: boolean;
     aggregate_balance: boolean;
   };
+  key_never_expires: boolean;
+  daily_request_limit: number;
 }
 
 // 表单数据
@@ -112,6 +114,8 @@ const formData = reactive<GroupFormData>({
     enabled: false,
     aggregate_balance: false,
   },
+  key_never_expires: false,
+  daily_request_limit: 0,
 });
 
 const channelTypeOptions = ref<{ label: string; value: string }[]>([]);
@@ -305,8 +309,8 @@ function resetForm() {
     sort: 1,
     test_model: isCreateMode ? testModelPlaceholder.value : "",
     validation_endpoint: "",
-    param_overrides: "",
-    model_redirect_rules: "",
+    param_overrides: {},
+    model_redirect_rules: {},
     model_redirect_strict: false,
     config: {},
     configItems: [],
@@ -317,6 +321,8 @@ function resetForm() {
       enabled: false,
       aggregate_balance: false,
     },
+    key_never_expires: false,
+    daily_request_limit: 0,
   });
 
   // 重置用户修改状态追踪
@@ -367,6 +373,8 @@ function loadGroupData() {
       enabled: false,
       aggregate_balance: false,
     },
+    key_never_expires: props.group.key_never_expires || false,
+    daily_request_limit: props.group.daily_request_limit || 0,
   });
 }
 
@@ -556,6 +564,8 @@ async function handleSubmit() {
         })),
       proxy_keys: formData.proxy_keys,
       balance_query_config: formData.balance_query_config,
+      key_never_expires: formData.key_never_expires,
+      daily_request_limit: formData.daily_request_limit,
     };
 
     let res: Group;
@@ -1272,6 +1282,69 @@ async function handleSubmit() {
                   <template #feedback>
                     <div style="font-size: 12px; color: #999; margin: 4px 0">
                       {{ t("keys.aggregateBalanceDescription") }}
+                    </div>
+                  </template>
+                </n-form-item>
+              </div>
+
+              <!-- 密钥失效配置 -->
+              <div v-if="formData.group_type !== 'aggregate'" class="config-section">
+                <h5 class="config-title-with-tooltip">
+                  {{ t("keys.keyExpirationConfig") }}
+                  <n-tooltip trigger="hover" placement="top">
+                    <template #trigger>
+                      <n-icon :component="HelpCircleOutline" class="help-icon config-help" />
+                    </template>
+                    {{ t("keys.keyExpirationConfigTooltip") }}
+                  </n-tooltip>
+                </h5>
+
+                <n-form-item>
+                  <template #label>
+                    <div class="form-label-with-tooltip">
+                      {{ t("keys.keyNeverExpires") }}
+                      <n-tooltip trigger="hover" placement="top">
+                        <template #trigger>
+                          <n-icon :component="HelpCircleOutline" class="help-icon" />
+                        </template>
+                        {{ t("keys.keyNeverExpiresTooltip") }}
+                      </n-tooltip>
+                    </div>
+                  </template>
+                  <div style="display: flex; align-items: center; gap: 12px">
+                    <n-switch v-model:value="formData.key_never_expires" />
+                    <span style="font-size: 14px; color: #666">
+                      {{ formData.key_never_expires ? t("common.enabled") : t("common.disabled") }}
+                    </span>
+                  </div>
+                  <template #feedback>
+                    <div style="font-size: 12px; color: #999; margin: 4px 0">
+                      {{ t("keys.keyNeverExpiresDescription") }}
+                    </div>
+                  </template>
+                </n-form-item>
+
+                <n-form-item>
+                  <template #label>
+                    <div class="form-label-with-tooltip">
+                      {{ t("keys.dailyRequestLimit") }}
+                      <n-tooltip trigger="hover" placement="top">
+                        <template #trigger>
+                          <n-icon :component="HelpCircleOutline" class="help-icon" />
+                        </template>
+                        {{ t("keys.dailyRequestLimitTooltip") }}
+                      </n-tooltip>
+                    </div>
+                  </template>
+                  <n-input-number
+                    v-model:value="formData.daily_request_limit"
+                    :min="0"
+                    :placeholder="t('keys.dailyRequestLimitPlaceholder')"
+                    style="width: 200px"
+                  />
+                  <template #feedback>
+                    <div style="font-size: 12px; color: #999; margin: 4px 0">
+                      {{ t("keys.dailyRequestLimitDescription") }}
                     </div>
                   </template>
                 </n-form-item>

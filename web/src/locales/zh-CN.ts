@@ -414,6 +414,17 @@ export default {
     aggregateBalanceDescription: "启用后会在分组卡片上显示汇总后的总余额",
     balanceLastUpdated: "最后更新时间",
     balanceQueryFailed: "查询失败",
+    // 密钥失效配置
+    keyExpirationConfig: "密钥失效配置",
+    keyExpirationConfigTooltip: "配置密钥的失效策略，控制密钥何时变得不可用",
+    keyNeverExpires: "密钥不失效",
+    keyNeverExpiresTooltip: "启用后，该分组内的密钥永远不会因为验证失败等原因被标记为失效",
+    keyNeverExpiresDescription: "启用后密钥不会因验证失败等原因被禁用",
+    dailyRequestLimit: "每日请求限制",
+    dailyRequestLimitTooltip: "设置每个密钥每天的最大请求次数，0表示不限制",
+    dailyRequestLimitPlaceholder: "每天可用次数（0=不限制）",
+    dailyRequestLimitDescription:
+      "每个密钥每天的最大请求次数，0表示不限制。当天用完限额后密钥将失效禁用",
     deleteTaskStarted: "密钥删除任务已开始，请稍后在下方查看进度。",
     addKeysToGroup: "为 {group} 添加密钥",
     deleteKeysFromGroup: "删除 {group} 的密钥",

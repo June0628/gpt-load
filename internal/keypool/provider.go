@@ -210,7 +210,12 @@ func (p *KeyProvider) handleFailure(apiKey *models.APIKey, group *models.Group, 
 		newFailureCount := failureCount + 1
 
 		updates := map[string]any{"failure_count": newFailureCount}
-		shouldBlacklist := blacklistThreshold > 0 && newFailureCount >= int64(blacklistThreshold)
+
+		// 检查是否应该将密钥加入黑名单
+		// 条件：1. 黑名单阈值 > 0 且失败次数达到阈值
+		//       2. 分组没有开启"密钥不失效"选项
+		shouldBlacklist := blacklistThreshold > 0 && newFailureCount >= int64(blacklistThreshold) && !group.KeyNeverExpires
+
 		if shouldBlacklist {
 			updates["status"] = models.KeyStatusInvalid
 		}
@@ -234,6 +239,12 @@ func (p *KeyProvider) handleFailure(apiKey *models.APIKey, group *models.Group, 
 
 			// 检查有效密钥数量是否低于阈值，发送飞书通知
 			p.checkAndNotifyLowKeyCount(group, activeKeysListKey)
+		} else if group.KeyNeverExpires {
+			logrus.WithFields(logrus.Fields{
+				"keyID":     apiKey.ID,
+				"groupID":   group.ID,
+				"isNeverExpire": true,
+			}).Debug("Key has failures but group has key_never_expires enabled, skipping blacklist")
 		}
 
 		return nil
@@ -755,4 +766,133 @@ func (p *KeyProvider) UpdateBalance(apiKey *models.APIKey, group *models.Group, 
 			"balance_used":  balanceInfo.BalanceUsed,
 		}).Debug("Key balance updated successfully")
 	}()
+}
+
+// IncrementDailyRequestCount 增加密钥的每日请求计数，并在达到限制时禁用密钥
+func (p *KeyProvider) IncrementDailyRequestCount(apiKey *models.APIKey, group *models.Group) {
+	go func() {
+		// 如果分组没有设置每日限制，则跳过
+		if group.DailyRequestLimit <= 0 {
+			return
+		}
+
+		keyHashKey := fmt.Sprintf("key:%d", apiKey.ID)
+		activeKeysListKey := fmt.Sprintf("group:%d:active_keys", group.ID)
+
+		today := time.Now().Truncate(24 * time.Hour)
+
+		// 使用事务更新或插入每日计数
+		err := p.executeTransactionWithRetry(func(tx *gorm.DB) error {
+			// 查找或创建今天的记录
+			var dailyRecord models.KeyDailyRequest
+			result := tx.Where("key_id = ? AND date = ?", apiKey.ID, today).First(&dailyRecord)
+
+			if result.Error == gorm.ErrRecordNotFound {
+				// 创建新记录
+				dailyRecord = models.KeyDailyRequest{
+					KeyID: apiKey.ID,
+					Date:  today,
+					Count: 1,
+				}
+				if err := tx.Create(&dailyRecord).Error; err != nil {
+					return fmt.Errorf("failed to create daily request record: %w", err)
+				}
+			} else if result.Error != nil {
+				return fmt.Errorf("failed to query daily request record: %w", result.Error)
+			} else {
+				// 更新计数
+				newCount := dailyRecord.Count + 1
+				if err := tx.Model(&dailyRecord).Update("count", newCount).Error; err != nil {
+					return fmt.Errorf("failed to update daily request count: %w", err)
+				}
+				dailyRecord.Count = newCount
+
+				// 检查是否达到每日限制
+				if int64(group.DailyRequestLimit) > 0 && newCount >= int64(group.DailyRequestLimit) {
+					// 禁用密钥
+					if err := tx.Model(&models.APIKey{}).Where("id = ?", apiKey.ID).Update("status", models.KeyStatusInvalid).Error; err != nil {
+						return fmt.Errorf("failed to disable key due to daily limit: %w", err)
+					}
+
+					// 从活跃列表中移除
+					if err := p.store.LRem(activeKeysListKey, 0, apiKey.ID); err != nil {
+						logrus.WithFields(logrus.Fields{"keyID": apiKey.ID, "error": err}).Error("Failed to LRem key from active list due to daily limit")
+					}
+					// 更新缓存状态
+					if err := p.store.HSet(keyHashKey, map[string]any{"status": models.KeyStatusInvalid}); err != nil {
+						logrus.WithFields(logrus.Fields{"keyID": apiKey.ID, "error": err}).Error("Failed to update key status in store due to daily limit")
+					}
+
+					logrus.WithFields(logrus.Fields{
+						"keyID":       apiKey.ID,
+						"dailyLimit":   group.DailyRequestLimit,
+						"requestCount": newCount,
+					}).Info("Key has reached daily request limit, disabling.")
+
+					// 检查有效密钥数量是否低于阈值
+					p.checkAndNotifyLowKeyCount(group, activeKeysListKey)
+				}
+			}
+
+			return nil
+		})
+
+		if err != nil {
+			logrus.WithFields(logrus.Fields{
+				"keyID": apiKey.ID,
+				"error": err,
+			}).Error("Failed to increment daily request count")
+		}
+	}()
+}
+
+// CheckDailyRequestLimit 检查密钥是否已达到每日限制，如果达到则从活跃列表中移除
+func (p *KeyProvider) CheckDailyRequestLimit(apiKey *models.APIKey, group *models.Group) bool {
+	// 如果分组没有设置每日限制，则不检查
+	if group.DailyRequestLimit <= 0 {
+		return false
+	}
+
+	keyHashKey := fmt.Sprintf("key:%d", apiKey.ID)
+	activeKeysListKey := fmt.Sprintf("group:%d:active_keys", group.ID)
+
+	today := time.Now().Truncate(24 * time.Hour)
+
+	var dailyRecord models.KeyDailyRequest
+	result := p.db.Where("key_id = ? AND date = ?", apiKey.ID, today).First(&dailyRecord)
+
+	if result.Error == gorm.ErrRecordNotFound {
+		// 今天还没有记录，可以继续使用
+		return false
+	}
+
+	if result.Error != nil {
+		logrus.WithFields(logrus.Fields{
+			"keyID": apiKey.ID,
+			"error": result.Error,
+		}).Error("Failed to query daily request record, allowing key usage")
+		return false
+	}
+
+	// 检查是否已达到每日限制
+	if int64(group.DailyRequestLimit) > 0 && dailyRecord.Count >= int64(group.DailyRequestLimit) {
+		logrus.WithFields(logrus.Fields{
+			"keyID":       apiKey.ID,
+			"dailyLimit":  group.DailyRequestLimit,
+			"requestCount": dailyRecord.Count,
+		}).Debug("Key has reached daily request limit, skipping.")
+
+		// 从活跃列表中移除
+		if err := p.store.LRem(activeKeysListKey, 0, apiKey.ID); err != nil {
+			logrus.WithFields(logrus.Fields{"keyID": apiKey.ID, "error": err}).Error("Failed to LRem key from active list due to daily limit check")
+		}
+		// 更新缓存状态
+		if err := p.store.HSet(keyHashKey, map[string]any{"status": models.KeyStatusInvalid}); err != nil {
+			logrus.WithFields(logrus.Fields{"keyID": apiKey.ID, "error": err}).Error("Failed to update key status in store due to daily limit check")
+		}
+
+		return true
+	}
+
+	return false
 }

@@ -117,6 +117,8 @@ export interface Group {
   sub_group_ids?: number[]; // 子分组 ID 列表
   balance_query_config?: BalanceQueryConfig; // 余额查询配置
   balance_info?: GroupBalanceInfo; // 余额汇总信息
+  key_never_expires?: boolean; // 密钥永不失效
+  daily_request_limit?: number; // 每日请求限制（按次计算）
   created_at?: string;
   updated_at?: string;
 }

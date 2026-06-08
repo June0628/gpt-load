@@ -125,11 +125,13 @@ type Group struct {
 	HeaderRules         datatypes.JSON       `gorm:"type:json" json:"header_rules"`
 	ModelRedirectRules  datatypes.JSONMap    `gorm:"type:json" json:"model_redirect_rules"`
 	ModelRedirectStrict bool                 `gorm:"default:false" json:"model_redirect_strict"`
+	KeyNeverExpires     bool                 `gorm:"default:false" json:"key_never_expires"`      // 密钥永不失效
+	DailyRequestLimit   int                  `gorm:"default:0" json:"daily_request_limit"`          // 每日请求限制（按次计算）
 	APIKeys             []APIKey             `gorm:"foreignKey:GroupID" json:"api_keys"`
 	SubGroups           []GroupSubGroup      `gorm:"-" json:"sub_groups,omitempty"`
-	LastValidatedAt     *time.Time           `json:"last_validated_at"`
-	CreatedAt           time.Time            `json:"created_at"`
-	UpdatedAt           time.Time            `json:"updated_at"`
+	LastValidatedAt     *time.Time           `gorm:"column:last_validated_at" json:"last_validated_at"`
+	CreatedAt           time.Time            `gorm:"column:created_at" json:"created_at"`
+	UpdatedAt           time.Time            `gorm:"column:updated_at" json:"updated_at"`
 
 	// For cache
 	ProxyKeysMap              map[string]struct{}        `gorm:"-" json:"-"`
@@ -242,4 +244,14 @@ type GroupHourlyStat struct {
 	FailureCount int64     `gorm:"not null;default:0" json:"failure_count"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+// KeyDailyRequest 对应 key_daily_requests 表，用于存储密钥每日请求计数
+type KeyDailyRequest struct {
+	ID        uint      `gorm:"primaryKey;autoIncrement" json:"id"`
+	KeyID     uint      `gorm:"not null;uniqueIndex:idx_key_daily_date" json:"key_id"`
+	Date      time.Time `gorm:"type:date;not null;uniqueIndex:idx_key_daily_date" json:"date"` // 日期（不含时间）
+	Count     int64     `gorm:"not null;default:0" json:"count"`                                 // 当日请求次数
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }

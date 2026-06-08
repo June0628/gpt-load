@@ -64,6 +64,8 @@ type GroupCreateRequest struct {
 	HeaderRules         []models.HeaderRule        `json:"header_rules"`
 	ProxyKeys           string                     `json:"proxy_keys"`
 	BalanceQueryConfig  *BalanceQueryConfigRequest `json:"balance_query_config,omitempty"`
+	KeyNeverExpires     bool                       `json:"key_never_expires"`
+	DailyRequestLimit   int                        `json:"daily_request_limit"`
 }
 
 // CreateGroup handles the creation of a new group.
@@ -90,6 +92,8 @@ func (s *Server) CreateGroup(c *gin.Context) {
 		Config:              req.Config,
 		HeaderRules:         req.HeaderRules,
 		ProxyKeys:           req.ProxyKeys,
+		KeyNeverExpires:     req.KeyNeverExpires,
+		DailyRequestLimit:   req.DailyRequestLimit,
 	}
 
 	if req.BalanceQueryConfig != nil {
@@ -147,6 +151,8 @@ type GroupUpdateRequest struct {
 	HeaderRules         []models.HeaderRule    `json:"header_rules"`
 	ProxyKeys           *string                `json:"proxy_keys,omitempty"`
 	BalanceQueryConfig  *BalanceQueryConfigRequest `json:"balance_query_config,omitempty"`
+	KeyNeverExpires     *bool                  `json:"key_never_expires,omitempty"`
+	DailyRequestLimit   *int                   `json:"daily_request_limit,omitempty"`
 }
 
 type GroupReorderItemRequest struct {
@@ -230,6 +236,10 @@ func (s *Server) UpdateGroup(c *gin.Context) {
 			AggregateBalance: req.BalanceQueryConfig.AggregateBalance,
 		}
 	}
+
+	// 添加密钥失效配置参数
+	params.KeyNeverExpires = req.KeyNeverExpires
+	params.DailyRequestLimit = req.DailyRequestLimit
 
 	group, err := s.GroupService.UpdateGroup(c.Request.Context(), uint(id), params)
 	if s.handleGroupError(c, err) {
