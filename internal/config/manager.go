@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 
 	"gpt-load/internal/errors"
 	"gpt-load/internal/types"
@@ -38,6 +39,7 @@ var DefaultConstants = Constants{
 type Manager struct {
 	config          *Config
 	settingsManager *SystemSettingsManager
+	mu              sync.RWMutex
 }
 
 // Config represents the application configuration
@@ -104,7 +106,9 @@ func (m *Manager) ReloadConfig() error {
 		RedisDSN:      os.Getenv("REDIS_DSN"),
 		EncryptionKey: os.Getenv("ENCRYPTION_KEY"),
 	}
+	m.mu.Lock()
 	m.config = config
+	m.mu.Unlock()
 
 	// Validate configuration
 	if err := m.Validate(); err != nil {
@@ -116,51 +120,72 @@ func (m *Manager) ReloadConfig() error {
 
 // IsMaster returns Server mode
 func (m *Manager) IsMaster() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	return m.config.Server.IsMaster
 }
 
 // GetAuthConfig returns authentication configuration
 func (m *Manager) GetAuthConfig() types.AuthConfig {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	return m.config.Auth
 }
 
 // GetCORSConfig returns CORS configuration
 func (m *Manager) GetCORSConfig() types.CORSConfig {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	return m.config.CORS
 }
 
 // GetPerformanceConfig returns performance configuration
 func (m *Manager) GetPerformanceConfig() types.PerformanceConfig {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	return m.config.Performance
 }
 
 // GetLogConfig returns logging configuration
 func (m *Manager) GetLogConfig() types.LogConfig {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	return m.config.Log
 }
 
 // GetRedisDSN returns the Redis DSN string.
 func (m *Manager) GetRedisDSN() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	return m.config.RedisDSN
 }
 
 // GetDatabaseConfig returns the database configuration.
 func (m *Manager) GetDatabaseConfig() types.DatabaseConfig {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	return m.config.Database
 }
 
 // GetEncryptionKey returns the encryption key.
 func (m *Manager) GetEncryptionKey() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	return m.config.EncryptionKey
 }
 
 // GetEffectiveServerConfig returns server configuration merged with system settings
 func (m *Manager) GetEffectiveServerConfig() types.ServerConfig {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	return m.config.Server
 }
 
 // Validate validates the configuration
 func (m *Manager) Validate() error {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
 	var validationErrors []string
 
 	// Validate port

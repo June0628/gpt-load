@@ -114,7 +114,9 @@ func (s *aesService) BatchDecrypt(ciphertexts []string) map[string]string {
 	return results
 }
 
-// Hash generates a hash of the plaintext using HMAC-SHA256
+// Hash generates a hash of the plaintext using HMAC-SHA256.
+// 警告：此 hash 依赖 encryption key。切换加密模式（如从 noop 切换到 aes 或更换 key）
+// 会导致所有现有 key_hash 失效。如需切换加密模式，必须手动重新计算所有 key 的 hash。
 func (s *aesService) Hash(plaintext string) string {
 	if plaintext == "" {
 		return ""

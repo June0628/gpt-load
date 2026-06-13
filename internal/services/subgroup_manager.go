@@ -228,8 +228,8 @@ func (s *selector) hasActiveKeys(groupID uint) bool {
 		logrus.WithFields(logrus.Fields{
 			"group_id": groupID,
 			"error":    err,
-		}).Debug("Error checking active keys, assuming available")
-		return true
+		}).Debug("Error checking active keys, assuming not available")
+		return false
 	}
 	return length > 0
 }

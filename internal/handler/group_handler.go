@@ -25,9 +25,6 @@ func (s *Server) handleGroupError(c *gin.Context, err error) bool {
 	}
 
 	if svcErr, ok := err.(*services.I18nError); ok {
-		if svcErr == nil {
-			return false
-		}
 		if svcErr.Template != nil {
 			response.ErrorI18nFromAPIError(c, svcErr.APIError, svcErr.MessageID, svcErr.Template)
 		} else {
@@ -314,6 +311,8 @@ type GroupResponse struct {
 	ProxyKeys           string                      `json:"proxy_keys"`
 	BalanceQueryConfig  *BalanceQueryConfigResponse `json:"balance_query_config"`
 	BalanceInfo         *GroupBalanceInfoResponse   `json:"balance_info,omitempty"`
+	KeyNeverExpires     bool                        `json:"key_never_expires"`
+	DailyRequestLimit   int                         `json:"daily_request_limit"`
 	LastValidatedAt     *time.Time                  `json:"last_validated_at"`
 	CreatedAt           time.Time                   `json:"created_at"`
 	UpdatedAt           time.Time                   `json:"updated_at"`
@@ -438,10 +437,12 @@ func (s *Server) newGroupResponse(ctx *gin.Context, group *models.Group) *GroupR
 			Enabled:          group.EnableBalanceQuery,
 			AggregateBalance: group.AggregateBalance,
 		},
-		BalanceInfo:     balanceInfo,
-		LastValidatedAt: group.LastValidatedAt,
-		CreatedAt:       group.CreatedAt,
-		UpdatedAt:       group.UpdatedAt,
+		BalanceInfo:       balanceInfo,
+		KeyNeverExpires:   group.KeyNeverExpires,
+		DailyRequestLimit: group.DailyRequestLimit,
+		LastValidatedAt:   group.LastValidatedAt,
+		CreatedAt:         group.CreatedAt,
+		UpdatedAt:         group.UpdatedAt,
 	}
 }
 

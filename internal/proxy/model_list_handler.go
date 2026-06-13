@@ -26,6 +26,8 @@ func shouldInterceptModelList(path string, method string) bool {
 
 // handleModelListResponse processes the model list response and applies filtering based on redirect rules
 func (ps *ProxyServer) handleModelListResponse(c *gin.Context, resp *http.Response, group *models.Group, channelHandler channel.ChannelProxy) {
+	defer resp.Body.Close()
+
 	// Read the upstream response body
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {

@@ -122,6 +122,17 @@ func extractFileFromContentItem(item map[string]any, files *[]AgentFileContent) 
 				Data: data,
 			})
 		}
+
+	case "text":
+		// 文本类型（如Cline插件发送的代码文件内容）
+		// Cline等插件将文件内容作为type:"text"发送
+		text, _ := item["text"].(string)
+		if text != "" {
+			*files = append(*files, AgentFileContent{
+				Type: "text",
+				Data: text,
+			})
+		}
 	}
 }
 
@@ -173,14 +184,34 @@ func extractBase64FromString(s string, files *[]AgentFileContent) {
 }
 
 // AgentFilesToJSON 将提取的文件内容转换为JSON字符串用于存储
+// MySQL MEDIUMTEXT 限制为 16MB，超出时截断最后一个文件以确保不超限
 func AgentFilesToJSON(files []AgentFileContent) string {
 	if len(files) == 0 {
 		return ""
 	}
 
+	const maxJSONSize = 16 * 1024 * 1024 // 16MB
+
 	data, err := json.Marshal(files)
 	if err != nil {
 		return ""
+	}
+
+	// 如果序列化后超出限制，逐个移除文件直到大小符合限制
+	if len(data) > maxJSONSize && len(files) > 0 {
+		for len(files) > 0 {
+			files = files[:len(files)-1]
+			if len(files) == 0 {
+				return ""
+			}
+			data, err = json.Marshal(files)
+			if err != nil {
+				return ""
+			}
+			if len(data) <= maxJSONSize {
+				break
+			}
+		}
 	}
 
 	return string(data)

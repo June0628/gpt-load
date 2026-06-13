@@ -39,6 +39,7 @@ func NewDB(configManager types.ConfigManager) (*gorm.DB, error) {
 	}
 
 	var dialector gorm.Dialector
+	var isSQLite bool
 	if strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
 		dialector = postgres.New(postgres.Config{
 			DSN:                  dsn,
@@ -58,6 +59,7 @@ func NewDB(configManager types.ConfigManager) (*gorm.DB, error) {
 			return nil, fmt.Errorf("failed to create database directory: %w", err)
 		}
 		dialector = sqlite.Open(dsn + "?_busy_timeout=5000")
+		isSQLite = true
 	}
 
 	var err error
@@ -73,10 +75,18 @@ func NewDB(configManager types.ConfigManager) (*gorm.DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to get sql.DB: %w", err)
 	}
-	// Set connection pool parameters for all drivers
-	sqlDB.SetMaxIdleConns(50)
-	sqlDB.SetMaxOpenConns(500)
-	sqlDB.SetConnMaxLifetime(time.Hour)
+
+	// 根据数据库类型设置连接池参数
+	// SQLite 是文件级锁，多连接会造成严重锁竞争，限制为单连接
+	if isSQLite {
+		sqlDB.SetMaxOpenConns(1)
+		sqlDB.SetMaxIdleConns(1)
+		sqlDB.SetConnMaxLifetime(0)
+	} else {
+		sqlDB.SetMaxIdleConns(50)
+		sqlDB.SetMaxOpenConns(500)
+		sqlDB.SetConnMaxLifetime(time.Hour)
+	}
 
 	return DB, nil
 }

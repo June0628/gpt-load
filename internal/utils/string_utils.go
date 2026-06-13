@@ -3,6 +3,7 @@ package utils
 import (
 	"fmt"
 	"strings"
+	"unicode/utf8"
 )
 
 // MaskAPIKey masks an API key for safe logging.
@@ -14,12 +15,13 @@ func MaskAPIKey(key string) string {
 	return fmt.Sprintf("%s****%s", key[:4], key[length-4:])
 }
 
-// TruncateString shortens a string to a maximum length.
+// TruncateString shortens a string to a maximum length (in runes, not bytes).
 func TruncateString(s string, maxLength int) string {
-	if len(s) > maxLength {
-		return s[:maxLength]
+	if utf8.RuneCountInString(s) <= maxLength {
+		return s
 	}
-	return s
+	runes := []rune(s)
+	return string(runes[:maxLength])
 }
 
 // SplitAndTrim splits a string by a separator

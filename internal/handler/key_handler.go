@@ -18,6 +18,27 @@ import (
 	"gorm.io/gorm"
 )
 
+// sanitizeFilename removes or replaces characters that are unsafe for filenames
+// and prevents HTTP header injection.
+func sanitizeFilename(name string) string {
+	// 替换路径分隔符和危险字符
+	replacer := strings.NewReplacer(
+		"/", "_",
+		"\\", "_",
+		"..", "_",
+		"\x00", "",
+		"\r", "",
+		"\n", "",
+		"\"", "'",
+	)
+	sanitized := replacer.Replace(name)
+	// 限制长度
+	if utf8.RuneCountInString(sanitized) > 100 {
+		sanitized = string([]rune(sanitized)[:100])
+	}
+	return sanitized
+}
+
 // validateGroupIDFromQuery validates and parses group ID from a query parameter.
 // Returns 0 and false if validation fails (error is already sent to client)
 func validateGroupIDFromQuery(c *gin.Context) (uint, bool) {
@@ -489,8 +510,8 @@ func (s *Server) ExportKeys(c *gin.Context) {
 		return
 	}
 
-	filename := fmt.Sprintf("keys-%s-%s.txt", group.Name, statusFilter)
-	c.Header("Content-Disposition", "attachment; filename="+filename)
+	filename := fmt.Sprintf("keys-%s-%s.txt", sanitizeFilename(group.Name), statusFilter)
+	c.Header("Content-Disposition", "attachment; filename=\""+filename+"\"")
 	c.Header("Content-Type", "text/plain; charset=utf-8")
 
 	if err := s.KeyService.StreamKeysToWriter(groupID, statusFilter, c.Writer); err != nil {

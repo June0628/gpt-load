@@ -199,7 +199,7 @@ func (s *LogUploadService) exportTableToCSVFile(tableName string) (string, int, 
 	rowCount := 0
 
 	// 使用流式导出
-	_, err = s.exportTableToCSVStream(tableName, func(row []string) error {
+	rowCount, err = s.exportTableToCSVStream(tableName, func(row []string) error {
 		return writer.Write(row)
 	})
 	if err != nil {

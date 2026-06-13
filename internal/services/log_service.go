@@ -319,8 +319,6 @@ func (s *LogService) StreamLogKeysToCSV(c *gin.Context, writer io.Writer) error 
 		return fmt.Errorf("failed to write CSV header: %w", err)
 	}
 
-	var results []ExportableLogKey
-
 	// 获取时间范围用于确定查询哪些表
 	startTimeStr := c.Query("start_time")
 	endTimeStr := c.Query("end_time")
@@ -371,14 +369,21 @@ func (s *LogService) StreamLogKeysToCSV(c *gin.Context, writer io.Writer) error 
 		ORDER BY key_hash
 	`, strings.Join(subQueries, " UNION ALL "))
 
-	err := s.DB.Raw(query, allArgs...).Scan(&results).Error
-
+	// 使用流式查询，避免大数据量全量加载到内存
+	rows, err := s.DB.Raw(query, allArgs...).Rows()
 	if err != nil {
 		return fmt.Errorf("failed to fetch log keys: %w", err)
 	}
+	defer rows.Close()
 
 	// 解密并写入 CSV 数据
-	for _, record := range results {
+	for rows.Next() {
+		var record ExportableLogKey
+		if err := s.DB.ScanRows(rows, &record); err != nil {
+			logrus.WithError(err).Error("Failed to scan log key row")
+			continue
+		}
+
 		// 解密密钥用于 CSV 导出
 		decryptedKey := record.KeyValue
 		if record.KeyValue != "" {
@@ -398,6 +403,10 @@ func (s *LogService) StreamLogKeysToCSV(c *gin.Context, writer io.Writer) error 
 		if err := csvWriter.Write(csvRecord); err != nil {
 			return fmt.Errorf("failed to write CSV record: %w", err)
 		}
+	}
+
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("rows iteration error: %w", err)
 	}
 
 	return nil

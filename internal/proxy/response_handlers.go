@@ -9,6 +9,8 @@ import (
 )
 
 func (ps *ProxyServer) handleStreamingResponse(c *gin.Context, resp *http.Response) {
+	defer resp.Body.Close()
+
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")
@@ -42,6 +44,7 @@ func (ps *ProxyServer) handleStreamingResponse(c *gin.Context, resp *http.Respon
 }
 
 func (ps *ProxyServer) handleNormalResponse(c *gin.Context, resp *http.Response) {
+	// 注意：调用方负责关闭 resp.Body，这里不重复关闭
 	if _, err := io.Copy(c.Writer, resp.Body); err != nil {
 		logUpstreamError("copying response body", err)
 	}

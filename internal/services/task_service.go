@@ -46,16 +46,8 @@ func NewTaskService(store store.Store) *TaskService {
 }
 
 // StartTask attempts to start a new task. It returns an error if a task is already running.
+// 使用 SetNX 保证原子性，避免并发时启动多个任务。
 func (s *TaskService) StartTask(taskType, groupName string, total int) (*TaskStatus, error) {
-	currentStatus, err := s.GetTaskStatus()
-	if err != nil {
-		return nil, fmt.Errorf("failed to check current task status before starting a new one: %w", err)
-	}
-
-	if currentStatus.IsRunning {
-		return nil, errors.New("a task is already running, please wait")
-	}
-
 	status := &TaskStatus{
 		TaskType:  taskType,
 		IsRunning: true,
@@ -69,8 +61,13 @@ func (s *TaskService) StartTask(taskType, groupName string, total int) (*TaskSta
 		return nil, fmt.Errorf("failed to serialize new task status: %w", err)
 	}
 
-	if err := s.store.Set(globalTaskKey, statusBytes, ResultTTL); err != nil {
+	// 使用 SetNX 原子地设置任务状态，如果已有任务在运行则失败
+	ok, err := s.store.SetNX(globalTaskKey, statusBytes, ResultTTL)
+	if err != nil {
 		return nil, fmt.Errorf("failed to set initial task status: %w", err)
+	}
+	if !ok {
+		return nil, errors.New("a task is already running, please wait")
 	}
 
 	return status, nil

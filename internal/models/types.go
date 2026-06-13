@@ -130,6 +130,7 @@ type Group struct {
 	APIKeys             []APIKey             `gorm:"foreignKey:GroupID" json:"api_keys"`
 	SubGroups           []GroupSubGroup      `gorm:"-" json:"sub_groups,omitempty"`
 	LastValidatedAt     *time.Time           `gorm:"column:last_validated_at" json:"last_validated_at"`
+	LastBalanceQueriedAt *time.Time          `gorm:"column:last_balance_queried_at" json:"last_balance_queried_at"`
 	CreatedAt           time.Time            `gorm:"column:created_at" json:"created_at"`
 	UpdatedAt           time.Time            `gorm:"column:updated_at" json:"updated_at"`
 

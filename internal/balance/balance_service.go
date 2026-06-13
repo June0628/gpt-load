@@ -21,31 +21,27 @@ type BalanceInfo = models.BalanceInfo
 type BalanceQueryResult = models.BalanceQueryResult
 
 // BalanceService 处理不同平台的余额查询
-type BalanceService struct {
-	HTTPClient *http.Client
-}
+type BalanceService struct{}
 
-// 全局 HTTP Client，支持连接池复用和超时设置
-var defaultHTTPClient *http.Client
-
-func init() {
-	transport := &http.Transport{
-		MaxIdleConns:        100,
-		MaxIdleConnsPerHost: 10,
-		IdleConnTimeout:     90 * time.Second,
-	}
-	defaultHTTPClient = &http.Client{
-		Timeout:   30 * time.Second,
-		Transport: transport,
-	}
-}
+// 包级 httpClient，由 NewBalanceService 设置，供平台处理器使用
+var serviceHTTPClient *http.Client
 
 // NewBalanceService 创建新的余额查询服务
 // 使用自定义 HTTP Client，支持连接池复用和超时设置
-func NewBalanceService() *BalanceService {
-	return &BalanceService{
-		HTTPClient: defaultHTTPClient,
+func NewBalanceService(client *http.Client) *BalanceService {
+	if client == nil {
+		transport := &http.Transport{
+			MaxIdleConns:        100,
+			MaxIdleConnsPerHost: 10,
+			IdleConnTimeout:     90 * time.Second,
+		}
+		client = &http.Client{
+			Timeout:   30 * time.Second,
+			Transport: transport,
+		}
 	}
+	serviceHTTPClient = client
+	return &BalanceService{}
 }
 
 // PlatformBalanceHandler 定义平台余额查询处理函数签名
@@ -159,7 +155,7 @@ func handleDefaultBalance(ctx context.Context, baseURL string, apiKey string, cu
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := defaultHTTPClient.Do(req)
+	resp, err := serviceHTTPClient.Do(req)
 	if err != nil {
 		return &BalanceInfo{
 			Success:      false,
@@ -230,7 +226,7 @@ func handleOpenAIBalance(ctx context.Context, baseURL string, apiKey string, cus
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := defaultHTTPClient.Do(req)
+	resp, err := serviceHTTPClient.Do(req)
 	if err != nil {
 		return &BalanceInfo{
 			Success:      false,
@@ -293,7 +289,7 @@ func handleSiliconFlowBalance(ctx context.Context, baseURL string, apiKey string
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := defaultHTTPClient.Do(req)
+	resp, err := serviceHTTPClient.Do(req)
 	if err != nil {
 		return &BalanceInfo{
 			Success:      false,
@@ -379,7 +375,7 @@ func handleChatAnywhereBalance(ctx context.Context, baseURL string, apiKey strin
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := defaultHTTPClient.Do(req)
+	resp, err := serviceHTTPClient.Do(req)
 	if err != nil {
 		return &BalanceInfo{
 			Success:      false,
@@ -469,7 +465,7 @@ func handleDeepSeekBalance(ctx context.Context, baseURL string, apiKey string, c
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := defaultHTTPClient.Do(req)
+	resp, err := serviceHTTPClient.Do(req)
 	if err != nil {
 		return &BalanceInfo{
 			Success:      false,
@@ -535,7 +531,7 @@ func handleMoonshotBalance(ctx context.Context, baseURL string, apiKey string, c
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := defaultHTTPClient.Do(req)
+	resp, err := serviceHTTPClient.Do(req)
 	if err != nil {
 		return &BalanceInfo{
 			Success:      false,
@@ -600,7 +596,7 @@ func handleBaichuanBalance(ctx context.Context, baseURL string, apiKey string, c
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := defaultHTTPClient.Do(req)
+	resp, err := serviceHTTPClient.Do(req)
 	if err != nil {
 		return &BalanceInfo{
 			Success:      false,
@@ -670,7 +666,7 @@ func handleMiniMaxBalance(ctx context.Context, baseURL string, apiKey string, cu
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := defaultHTTPClient.Do(req)
+	resp, err := serviceHTTPClient.Do(req)
 	if err != nil {
 		return &BalanceInfo{
 			Success:      false,
@@ -731,7 +727,7 @@ func handleZhipuBalance(ctx context.Context, baseURL string, apiKey string, cust
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := defaultHTTPClient.Do(req)
+	resp, err := serviceHTTPClient.Do(req)
 	if err != nil {
 		return &BalanceInfo{
 			Success:      false,
@@ -809,7 +805,7 @@ func handleDashScopeBalance(ctx context.Context, baseURL string, apiKey string, 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-DashScope-SPL", "enable")
 
-	resp, err := defaultHTTPClient.Do(req)
+	resp, err := serviceHTTPClient.Do(req)
 	if err != nil {
 		return &BalanceInfo{
 			Success:      false,

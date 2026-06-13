@@ -76,9 +76,9 @@ func (s *CronChecker) runLoop() {
 	for {
 		select {
 		case <-validationTicker.C:
-			logrus.Debug("CronChecker: Running as Master, submitting validation jobs.")
+			logrus.Debug("CronChecker: running as master, submitting validation jobs.")
 			s.submitValidationJobs()
-			logrus.Debug("CronChecker: Running as Master, submitting balance query jobs.")
+			logrus.Debug("CronChecker: running as master, submitting balance query jobs.")
 			s.submitBalanceQueryJobs()
 		case <-s.stopChan:
 			return
@@ -86,28 +86,43 @@ func (s *CronChecker) runLoop() {
 	}
 }
 
-// submitValidationJobs finds groups whose keys need validation and validates them concurrently.
-func (s *CronChecker) submitValidationJobs() {
+// forEachGroup loads non-aggregate groups and runs the given function concurrently for each group
+// that needs processing based on the configured interval.
+// useBalanceTimestamp: true 表示使用 LastBalanceQueriedAt 判断，false 表示使用 LastValidatedAt。
+func (s *CronChecker) forEachGroup(actionName string, useBalanceTimestamp bool, fn func(group *models.Group)) {
 	var groups []models.Group
 	if err := s.DB.Where("group_type != ? OR group_type IS NULL", "aggregate").Find(&groups).Error; err != nil {
-		logrus.Errorf("CronChecker: Failed to get groups: %v", err)
+		logrus.Errorf("CronChecker[%s]: failed to get groups: %v", actionName, err)
 		return
 	}
 
-	validationStartTime := time.Now()
+	startTime := time.Now()
 	var wg sync.WaitGroup
+
+	// 限制同时处理的 group 数量，避免 goroutine 爆炸
+	const maxConcurrentGroups = 10
+	sem := make(chan struct{}, maxConcurrentGroups)
 
 	for i := range groups {
 		group := &groups[i]
 		group.EffectiveConfig = s.SettingsManager.GetEffectiveConfig(group.Config)
 		interval := time.Duration(group.EffectiveConfig.KeyValidationIntervalMinutes) * time.Minute
 
-		if group.LastValidatedAt == nil || validationStartTime.Sub(*group.LastValidatedAt) > interval {
+		var lastProcessedAt *time.Time
+		if useBalanceTimestamp {
+			lastProcessedAt = group.LastBalanceQueriedAt
+		} else {
+			lastProcessedAt = group.LastValidatedAt
+		}
+
+		if lastProcessedAt == nil || startTime.Sub(*lastProcessedAt) > interval {
 			wg.Add(1)
+			sem <- struct{}{} // 获取信号量
 			g := group
 			go func() {
 				defer wg.Done()
-				s.validateGroupKeys(g)
+				defer func() { <-sem }() // 释放信号量
+				fn(g)
 			}()
 		}
 	}
@@ -115,30 +130,49 @@ func (s *CronChecker) submitValidationJobs() {
 	wg.Wait()
 }
 
-// validateGroupKeys validates all invalid keys for a single group concurrently.
-func (s *CronChecker) validateGroupKeys(group *models.Group) {
-	groupProcessStart := time.Now()
-
-	var invalidKeys []models.APIKey
-	err := s.DB.Where("group_id = ? AND status = ?", group.ID, models.KeyStatusInvalid).Find(&invalidKeys).Error
+// decryptKeyForUse decrypts the key and returns a new struct with only the fields needed for processing.
+// 避免修改原始数据，消除隐式副作用。
+func (s *CronChecker) decryptKeyForUse(key *models.APIKey) (*models.APIKey, error) {
+	decryptedKey, err := s.EncryptionSvc.Decrypt(key.KeyValue)
 	if err != nil {
-		logrus.Errorf("CronChecker: Failed to get invalid keys for group %s: %v", group.Name, err)
-		return
+		return nil, err
+	}
+	return &models.APIKey{
+		ID:       key.ID,
+		KeyValue: decryptedKey,
+		GroupID:  key.GroupID,
+		Status:   key.Status,
+	}, nil
+}
+
+// updateGroupTimestamp updates a timestamp column for a group.
+// columnName: "last_validated_at" or "last_balance_queried_at"
+func (s *CronChecker) updateGroupTimestamp(group *models.Group, columnName string) error {
+	if err := s.DB.Model(group).Update(columnName, time.Now()).Error; err != nil {
+		logrus.Errorf("CronChecker: failed to update %s for group %s: %v", columnName, group.Name, err)
+		return err
+	}
+	return nil
+}
+
+// runWorkerPool processes a slice of keys using a worker pool pattern with support for graceful shutdown.
+// It decrypts each key, runs the processFn, and returns the count of successful results.
+// rateLimiter 可选，用于控制所有 worker 的总请求速率（如 balance 查询限流）。
+func (s *CronChecker) runWorkerPool(
+	keys []models.APIKey,
+	concurrency int,
+	actionName string,
+	processFn func(key *models.APIKey) bool,
+	rateLimiter <-chan time.Time,
+) int32 {
+	if concurrency <= 0 {
+		concurrency = 5
 	}
 
-	if len(invalidKeys) == 0 {
-		if err := s.DB.Model(group).Update("last_validated_at", time.Now()).Error; err != nil {
-			logrus.Errorf("CronChecker: Failed to update last_validated_at for group %s: %v", group.Name, err)
-		}
-		logrus.Infof("CronChecker: Group '%s' has no invalid keys to check.", group.Name)
-		return
-	}
-
-	var becameValidCount int32
+	var successCount int32
 	var keyWg sync.WaitGroup
-	jobs := make(chan *models.APIKey, len(invalidKeys))
+	jobs := make(chan *models.APIKey, len(keys))
 
-	concurrency := group.EffectiveConfig.KeyValidationConcurrency
 	for range concurrency {
 		keyWg.Add(1)
 		go func() {
@@ -150,20 +184,24 @@ func (s *CronChecker) validateGroupKeys(group *models.Group) {
 						return
 					}
 
-					// Decrypt the key before validation
-					decryptedKey, err := s.EncryptionSvc.Decrypt(key.KeyValue)
+					// 等待速率限制器（如果有）
+					if rateLimiter != nil {
+						select {
+						case <-rateLimiter:
+						case <-s.stopChan:
+							return
+						}
+					}
+
+					// Decrypt the key before processing
+					keyForUse, err := s.decryptKeyForUse(key)
 					if err != nil {
-						logrus.WithError(err).WithField("key_id", key.ID).Error("CronChecker: Failed to decrypt key for validation, skipping")
+						logrus.WithError(err).WithField("key_id", key.ID).Errorf("CronChecker[%s]: failed to decrypt key, skipping", actionName)
 						continue
 					}
 
-					// Create a copy with decrypted value for validation
-					keyForValidation := *key
-					keyForValidation.KeyValue = decryptedKey
-
-					isValid, _ := s.Validator.ValidateSingleKey(&keyForValidation, group)
-					if isValid {
-						atomic.AddInt32(&becameValidCount, 1)
+					if processFn(keyForUse) {
+						atomic.AddInt32(&successCount, 1)
 					}
 				case <-s.stopChan:
 					return
@@ -173,9 +211,9 @@ func (s *CronChecker) validateGroupKeys(group *models.Group) {
 	}
 
 DistributeLoop:
-	for i := range invalidKeys {
+	for i := range keys {
 		select {
-		case jobs <- &invalidKeys[i]:
+		case jobs <- &keys[i]:
 		case <-s.stopChan:
 			break DistributeLoop
 		}
@@ -183,14 +221,56 @@ DistributeLoop:
 	close(jobs)
 
 	keyWg.Wait()
+	return successCount
+}
 
-	if err := s.DB.Model(group).Update("last_validated_at", time.Now()).Error; err != nil {
-		logrus.Errorf("CronChecker: Failed to update last_validated_at for group %s: %v", group.Name, err)
+// submitValidationJobs finds groups whose keys need validation and validates them concurrently.
+func (s *CronChecker) submitValidationJobs() {
+	s.forEachGroup("validation", false, func(group *models.Group) {
+		s.validateGroupKeys(group)
+	})
+}
+
+// validateGroupKeys validates all invalid keys for a single group concurrently.
+func (s *CronChecker) validateGroupKeys(group *models.Group) {
+	groupProcessStart := time.Now()
+
+	var invalidKeys []models.APIKey
+	err := s.DB.WithContext(context.Background()).Where("group_id = ? AND status = ?", group.ID, models.KeyStatusInvalid).Find(&invalidKeys).Error
+	if err != nil {
+		logrus.Errorf("CronChecker: failed to get invalid keys for group %s: %v", group.Name, err)
+		return
+	}
+
+	if len(invalidKeys) == 0 {
+		if err := s.updateGroupTimestamp(group, "last_validated_at"); err != nil {
+			logrus.Warnf("CronChecker: group '%s' validation timestamp not updated, will retry next cycle", group.Name)
+		}
+		logrus.Debugf("CronChecker: group '%s' has no invalid keys to check.", group.Name)
+		return
+	}
+
+	becameValidCount := s.runWorkerPool(
+		invalidKeys,
+		group.EffectiveConfig.KeyValidationConcurrency,
+		"validation",
+		func(key *models.APIKey) bool {
+			isValid, validationErr := s.Validator.ValidateSingleKey(key, group)
+			if validationErr != nil {
+				logrus.WithError(validationErr).WithField("key_id", key.ID).Debug("CronChecker[validation]: key validation error")
+			}
+			return isValid
+		},
+		nil, // validation 不需要限流
+	)
+
+	if err := s.updateGroupTimestamp(group, "last_validated_at"); err != nil {
+		logrus.Warnf("CronChecker: group '%s' validation finished but timestamp not updated, may cause duplicate processing next cycle", group.Name)
 	}
 
 	duration := time.Since(groupProcessStart)
 	logrus.Infof(
-		"CronChecker: Group '%s' validation finished. Total checked: %d, became valid: %d. Duration: %s.",
+		"CronChecker: group '%s' validation finished. total checked: %d, became valid: %d. duration: %s.",
 		group.Name,
 		len(invalidKeys),
 		becameValidCount,
@@ -201,32 +281,11 @@ DistributeLoop:
 // submitBalanceQueryJobs finds groups with balance query enabled and queries balances.
 // 复用 KeyValidationIntervalMinutes 配置作为余额查询间隔。
 func (s *CronChecker) submitBalanceQueryJobs() {
-	var groups []models.Group
-	if err := s.DB.Where("group_type != ? OR group_type IS NULL", "aggregate").Find(&groups).Error; err != nil {
-		logrus.Errorf("CronChecker: Failed to get groups for balance query: %v", err)
-		return
-	}
-
-	queryStartTime := time.Now()
-	var wg sync.WaitGroup
-
-	for i := range groups {
-		group := &groups[i]
-		group.EffectiveConfig = s.SettingsManager.GetEffectiveConfig(group.Config)
-		interval := time.Duration(group.EffectiveConfig.KeyValidationIntervalMinutes) * time.Minute
-
-		// 只有启用了余额查询且到达查询间隔的分组才执行
-		if group.ShouldQueryBalance() && (group.LastValidatedAt == nil || queryStartTime.Sub(*group.LastValidatedAt) > interval) {
-			wg.Add(1)
-			g := group
-			go func() {
-				defer wg.Done()
-				s.queryGroupBalances(g)
-			}()
+	s.forEachGroup("balance", true, func(group *models.Group) {
+		if group.ShouldQueryBalance() {
+			s.queryGroupBalances(group)
 		}
-	}
-
-	wg.Wait()
+	})
 }
 
 // queryGroupBalances queries balances for all active keys in a group.
@@ -234,93 +293,56 @@ func (s *CronChecker) queryGroupBalances(group *models.Group) {
 	groupProcessStart := time.Now()
 
 	var activeKeys []models.APIKey
-	err := s.DB.Where("group_id = ? AND status = ?", group.ID, models.KeyStatusActive).Find(&activeKeys).Error
+	err := s.DB.WithContext(context.Background()).Where("group_id = ? AND status = ?", group.ID, models.KeyStatusActive).Find(&activeKeys).Error
 	if err != nil {
-		logrus.Errorf("CronChecker: Failed to get active keys for balance query in group %s: %v", group.Name, err)
+		logrus.Errorf("CronChecker: failed to get active keys for balance query in group %s: %v", group.Name, err)
 		return
 	}
 
 	if len(activeKeys) == 0 {
-		logrus.Debugf("CronChecker: Group '%s' has no active keys for balance query.", group.Name)
+		if err := s.updateGroupTimestamp(group, "last_balance_queried_at"); err != nil {
+			logrus.Warnf("CronChecker: group '%s' balance timestamp not updated, will retry next cycle", group.Name)
+		}
+		logrus.Debugf("CronChecker: group '%s' has no active keys for balance query.", group.Name)
 		return
 	}
 
-	var successCount int32
-	var keyWg sync.WaitGroup
-	jobs := make(chan *models.APIKey, len(activeKeys))
-
-	concurrency := group.EffectiveConfig.KeyValidationConcurrency
-	if concurrency <= 0 {
-		concurrency = 5
-	}
-
-	// 限流：每个 worker 之间增加固定延迟，避免并发过高导致上游限流
+	// 限流：所有 worker 共享一个 ticker，控制整体请求速率
 	rateLimitDelay := 200 * time.Millisecond
+	rateLimiter := time.NewTicker(rateLimitDelay)
+	defer rateLimiter.Stop()
 
-	for i := range concurrency {
-		keyWg.Add(1)
-		go func(workerID int) {
-			defer keyWg.Done()
-			// 每个 worker 启动时错开时间，避免瞬间高并发
-			time.Sleep(time.Duration(workerID) * rateLimitDelay)
-			for {
-				select {
-				case key, ok := <-jobs:
-					if !ok {
-						return
-					}
-
-					// Decrypt the key before querying balance
-					decryptedKey, err := s.EncryptionSvc.Decrypt(key.KeyValue)
-					if err != nil {
-						logrus.WithError(err).WithField("key_id", key.ID).Error("CronChecker: Failed to decrypt key for balance query, skipping")
-						continue
-					}
-
-					// Create a copy with decrypted value
-					keyForQuery := *key
-					keyForQuery.KeyValue = decryptedKey
-
-					// Query balance directly without validation
-					balanceInfo, err := s.Validator.balanceService.QueryBalance(context.Background(), group, &keyForQuery)
-					if err != nil {
-						logrus.WithError(err).WithField("key_id", key.ID).Debug("CronChecker: Balance query failed")
-						continue
-					}
-
-					if balanceInfo != nil && balanceInfo.Success {
-						s.Validator.keypoolProvider.UpdateBalance(&keyForQuery, group, balanceInfo)
-						atomic.AddInt32(&successCount, 1)
-						logrus.WithFields(logrus.Fields{
-							"key_id":  key.ID,
-							"balance": balanceInfo.BalanceTotal,
-						}).Debug("CronChecker: Balance query successful")
-					}
-
-					// 每个请求之间增加延迟，避免触发上游限流
-					time.Sleep(rateLimitDelay)
-				case <-s.stopChan:
-					return
-				}
+	successCount := s.runWorkerPool(
+		activeKeys,
+		group.EffectiveConfig.KeyValidationConcurrency,
+		"balance",
+		func(key *models.APIKey) bool {
+			balanceInfo, err := s.Validator.balanceService.QueryBalance(context.Background(), group, key)
+			if err != nil {
+				logrus.WithError(err).WithField("key_id", key.ID).Debug("CronChecker[balance]: balance query failed")
+				return false
 			}
-		}(i)
-	}
 
-DistributeBalanceLoop:
-	for i := range activeKeys {
-		select {
-		case jobs <- &activeKeys[i]:
-		case <-s.stopChan:
-			break DistributeBalanceLoop
-		}
-	}
-	close(jobs)
+			if balanceInfo != nil && balanceInfo.Success {
+				s.Validator.keypoolProvider.UpdateBalance(key, group, balanceInfo)
+				logrus.WithFields(logrus.Fields{
+					"key_id":  key.ID,
+					"balance": balanceInfo.BalanceTotal,
+				}).Debug("CronChecker[balance]: balance query successful")
+				return true
+			}
+			return false
+		},
+		rateLimiter.C,
+	)
 
-	keyWg.Wait()
+	if err := s.updateGroupTimestamp(group, "last_balance_queried_at"); err != nil {
+		logrus.Warnf("CronChecker: group '%s' balance query finished but timestamp not updated, may cause duplicate processing next cycle", group.Name)
+	}
 
 	duration := time.Since(groupProcessStart)
 	logrus.Infof(
-		"CronChecker: Group '%s' balance query finished. Total checked: %d, success: %d. Duration: %s.",
+		"CronChecker: group '%s' balance query finished. total checked: %d, success: %d. duration: %s.",
 		group.Name,
 		len(activeKeys),
 		successCount,

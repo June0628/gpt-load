@@ -19,6 +19,9 @@ const (
 	chunkSize      = 500
 )
 
+// keyDelimiterRegex 预编译，避免每次调用 ParseKeysFromText 重新编译
+var keyDelimiterRegex = regexp.MustCompile(`[\s,;\n\r\t]+`)
+
 // AddKeysResult holds the result of adding multiple keys.
 type AddKeysResult struct {
 	AddedCount   int   `json:"added_count"`
@@ -167,9 +170,8 @@ func (s *KeyService) ParseKeysFromText(text string) []string {
 		return s.filterValidKeys(keys)
 	}
 
-	// 通用解析：通过分隔符分割文本，不使用复杂的正则表达式
-	delimiters := regexp.MustCompile(`[\s,;\n\r\t]+`)
-	splitKeys := delimiters.Split(strings.TrimSpace(text), -1)
+	// 通用解析：通过分隔符分割文本
+	splitKeys := keyDelimiterRegex.Split(strings.TrimSpace(text), -1)
 
 	for _, key := range splitKeys {
 		key = strings.TrimSpace(key)

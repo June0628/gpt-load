@@ -158,10 +158,12 @@ func ProxyAuth(gm *services.GroupManager) gin.HandlerFunc {
 		}
 
 		// Check both key collections to prevent timing attacks
+		// 注意：必须同时执行两个查找，避免短路求值导致的时序差异
 		_, existsInEffective := group.EffectiveConfig.ProxyKeysMap[key]
 		_, existsInGroup := group.ProxyKeysMap[key]
+		authorized := existsInEffective || existsInGroup
 
-		if existsInEffective || existsInGroup {
+		if authorized {
 			c.Next()
 			return
 		}

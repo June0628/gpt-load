@@ -182,9 +182,10 @@ func (s *RequestLogService) flush() {
 
 		if err != nil {
 			logrus.Errorf("Failed to flush request logs batch, will retry next time. Error: %v", err)
-			if len(keys) > 0 {
-				keysToRetry := make([]any, len(keys))
-				for i, k := range keys {
+			// 只重新入队成功反序列化的 keys，反序列化失败的已经跳过不应重试
+			if len(processedKeys) > 0 {
+				keysToRetry := make([]any, len(processedKeys))
+				for i, k := range processedKeys {
 					keysToRetry[i] = k
 				}
 				if saddErr := s.store.SAdd(PendingLogKeysSet, keysToRetry...); saddErr != nil {

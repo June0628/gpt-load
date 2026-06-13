@@ -83,10 +83,11 @@ func Paginate(c *gin.Context, query *gorm.DB, dest any, enableCount ...bool) (*P
 
 		// Trim to actual page size if we fetched an extra record
 		if hasMore {
-			trimmedDest := reflect.MakeSlice(items.Type(), pageSize, pageSize).Interface()
+			trimmedDest := reflect.MakeSlice(items.Type(), pageSize, pageSize)
 			// Copy the first pageSize elements from dest to trimmedDest
-			reflect.Copy(reflect.ValueOf(trimmedDest), items.Slice(0, pageSize))
-			dest = trimmedDest
+			reflect.Copy(trimmedDest, items.Slice(0, pageSize))
+			// 写回调用方传入的切片（dest 是指向切片的指针）
+			reflect.ValueOf(dest).Elem().Set(trimmedDest)
 		}
 		// If hasMore=false, dest already contains exactly pageSize records (or less for last page)
 	}

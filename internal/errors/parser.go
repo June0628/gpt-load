@@ -3,6 +3,7 @@ package errors
 import (
 	"encoding/json"
 	"strings"
+	"unicode/utf8"
 )
 
 const (
@@ -70,10 +71,11 @@ func ParseUpstreamError(body []byte) string {
 	return truncateString(string(body), maxErrorBodyLength)
 }
 
-// truncateString ensures a string does not exceed a maximum length.
+// truncateString ensures a string does not exceed a maximum length (in runes).
 func truncateString(s string, maxLength int) string {
-	if len(s) > maxLength {
-		return s[:maxLength]
+	if utf8.RuneCountInString(s) > maxLength {
+		runes := []rune(s)
+		return string(runes[:maxLength])
 	}
 	return s
 }

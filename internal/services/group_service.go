@@ -572,20 +572,20 @@ func (s *GroupService) DeleteGroup(ctx context.Context, id uint) error {
 		return app_errors.ParseDBError(err)
 	}
 
+	if err := tx.Commit().Error; err != nil {
+		return app_errors.ErrDatabase
+	}
+	tx = nil
+
+	// Store 操作在 DB commit 之后执行，避免事务回滚但 store 已改的不一致
 	if len(keyIDs) > 0 {
 		if err := s.keyService.KeyProvider.RemoveKeysFromStore(id, keyIDs); err != nil {
 			logrus.WithContext(ctx).WithFields(logrus.Fields{
 				"groupID":  id,
 				"keyCount": len(keyIDs),
-			}).WithError(err).Error("failed to remove keys from memory store, rolling back transaction")
-			return NewI18nError(app_errors.ErrDatabase, "error.delete_group_cache", nil)
+			}).WithError(err).Error("failed to remove keys from memory store after DB commit")
 		}
 	}
-
-	if err := tx.Commit().Error; err != nil {
-		return app_errors.ErrDatabase
-	}
-	tx = nil
 
 	if err := s.groupManager.Invalidate(); err != nil {
 		logrus.WithContext(ctx).WithError(err).Error("failed to invalidate group cache")
@@ -1052,13 +1052,15 @@ func (s *GroupService) generateUniqueGroupName(ctx context.Context, baseName str
 	return copyName
 }
 
+// validGroupNameRegex 预编译，避免每次调用重新编译
+var validGroupNameRegex = regexp.MustCompile("^[a-z0-9_-]{1,100}$")
+
 // isValidGroupName validates the group name.
 func isValidGroupName(name string) bool {
 	if name == "" {
 		return false
 	}
-	match, _ := regexp.MatchString("^[a-z0-9_-]{1,100}$", name)
-	return match
+	return validGroupNameRegex.MatchString(name)
 }
 
 // isValidValidationEndpoint validates custom validation endpoint path.

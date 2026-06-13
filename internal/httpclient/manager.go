@@ -37,6 +37,35 @@ type HTTPClientManager struct {
 	lock    sync.RWMutex
 }
 
+// RemoveClient closes and removes a cached client by its fingerprint.
+// If the client is not found, it returns false.
+func (m *HTTPClientManager) RemoveClient(fingerprint string) bool {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+	client, exists := m.clients[fingerprint]
+	if !exists {
+		return false
+	}
+	// Close the transport to release underlying connections
+	if transport, ok := client.Transport.(*http.Transport); ok {
+		transport.CloseIdleConnections()
+	}
+	delete(m.clients, fingerprint)
+	return true
+}
+
+// Close closes all cached clients and releases their underlying connections.
+func (m *HTTPClientManager) Close() {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+	for _, client := range m.clients {
+		if transport, ok := client.Transport.(*http.Transport); ok {
+			transport.CloseIdleConnections()
+		}
+	}
+	m.clients = make(map[string]*http.Client)
+}
+
 // NewHTTPClientManager creates a new client manager.
 func NewHTTPClientManager() *HTTPClientManager {
 	return &HTTPClientManager{

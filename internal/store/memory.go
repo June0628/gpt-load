@@ -19,6 +19,7 @@ type MemoryStore struct {
 	data          map[string]any
 	muSubscribers sync.RWMutex
 	subscribers   map[string]map[chan *Message]struct{}
+	stopCleanup   chan struct{}
 }
 
 // NewMemoryStore creates and returns a new MemoryStore instance.
@@ -26,12 +27,43 @@ func NewMemoryStore() *MemoryStore {
 	s := &MemoryStore{
 		data:        make(map[string]any),
 		subscribers: make(map[string]map[chan *Message]struct{}),
+		stopCleanup: make(chan struct{}),
 	}
+	go s.cleanupExpired()
 	return s
+}
+
+// cleanupExpired 定期清理过期的 key
+func (s *MemoryStore) cleanupExpired() {
+	ticker := time.NewTicker(1 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			s.deleteExpired()
+		case <-s.stopCleanup:
+			return
+		}
+	}
+}
+
+// deleteExpired 删除所有过期的 key
+func (s *MemoryStore) deleteExpired() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now().UnixNano()
+	for key, rawItem := range s.data {
+		if item, ok := rawItem.(memoryStoreItem); ok {
+			if item.expiresAt > 0 && now > item.expiresAt {
+				delete(s.data, key)
+			}
+		}
+	}
 }
 
 // Close cleans up resources.
 func (s *MemoryStore) Close() error {
+	close(s.stopCleanup)
 	return nil
 }
 

@@ -4,7 +4,6 @@ import (
 	"net/http"
 	"sort"
 	"strings"
-	"time"
 
 	"gpt-load/internal/db"
 	app_errors "gpt-load/internal/errors"
@@ -83,8 +82,6 @@ func (s *Server) UpdateSettings(c *gin.Context) {
 		response.Error(c, app_errors.NewAPIError(app_errors.ErrDatabase, err.Error()))
 		return
 	}
-
-	time.Sleep(100 * time.Millisecond) // 等待异步更新配置
 
 	response.SuccessI18n(c, "settings.update_success", nil)
 }
