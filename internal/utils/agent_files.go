@@ -13,11 +13,7 @@ type AgentFileContent struct {
 	Data     string `json:"data"`      // base64编码的数据或文本内容
 }
 
-// ExtractAgentFiles 从OpenAI兼容的请求体中提取文件内容
-// 支持的格式：
-// 1. messages[].content[].type == "image_url" -> 提取 base64 图片数据
-// 2. messages[].content[].type == "file" -> 提取文件内容
-// 3. 其他可能的文件类型
+// ExtractAgentFiles 从OpenAI兼容的请求体中提取文件内容 (image_url/file/text等)
 func ExtractAgentFiles(requestBody []byte) []AgentFileContent {
 	if len(requestBody) == 0 {
 		return nil
@@ -136,8 +132,7 @@ func extractFileFromContentItem(item map[string]any, files *[]AgentFileContent) 
 	}
 }
 
-// extractBase64FromURL 从URL中提取base64数据
-// 支持格式: data:image/png;base64,iVBORw0KGgo...
+// extractBase64FromURL 从 data URL 中提取 base64 数据
 func extractBase64FromURL(url, contentType string, files *[]AgentFileContent) {
 	if url == "" {
 		return
@@ -183,8 +178,7 @@ func extractBase64FromString(s string, files *[]AgentFileContent) {
 	extractBase64FromURL(sub, "unknown", files)
 }
 
-// AgentFilesToJSON 将提取的文件内容转换为JSON字符串用于存储
-// MySQL MEDIUMTEXT 限制为 16MB，超出时截断最后一个文件以确保不超限
+// AgentFilesToJSON 将文件内容转为 JSON 字符串，超出 16MB 时截断
 func AgentFilesToJSON(files []AgentFileContent) string {
 	if len(files) == 0 {
 		return ""

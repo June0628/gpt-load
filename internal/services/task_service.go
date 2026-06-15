@@ -45,8 +45,7 @@ func NewTaskService(store store.Store) *TaskService {
 	}
 }
 
-// StartTask attempts to start a new task. It returns an error if a task is already running.
-// 使用 SetNX 保证原子性，避免并发时启动多个任务。
+// StartTask 启动新任务，使用 SetNX 保证原子性
 func (s *TaskService) StartTask(taskType, groupName string, total int) (*TaskStatus, error) {
 	status := &TaskStatus{
 		TaskType:  taskType,

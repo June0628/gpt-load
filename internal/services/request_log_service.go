@@ -131,7 +131,7 @@ func (s *RequestLogService) Record(log *models.RequestLog) error {
 	return s.store.SAdd(PendingLogKeysSet, cacheKey)
 }
 
-// flush data from cache to database
+// flush 从缓存刷写日志到数据库
 func (s *RequestLogService) flush() {
 	if s.settingsManager.GetSettings().RequestLogWriteIntervalMinutes == 0 {
 		logrus.Debug("Sync mode enabled, skipping scheduled log flush.")

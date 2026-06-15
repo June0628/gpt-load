@@ -28,19 +28,16 @@ var serviceHTTPClient *http.Client
 
 // NewBalanceService 创建新的余额查询服务
 // 使用自定义 HTTP Client，支持连接池复用和超时设置
-func NewBalanceService(client *http.Client) *BalanceService {
-	if client == nil {
-		transport := &http.Transport{
-			MaxIdleConns:        100,
-			MaxIdleConnsPerHost: 10,
-			IdleConnTimeout:     90 * time.Second,
-		}
-		client = &http.Client{
-			Timeout:   30 * time.Second,
-			Transport: transport,
-		}
+func NewBalanceService() *BalanceService {
+	transport := &http.Transport{
+		MaxIdleConns:        100,
+		MaxIdleConnsPerHost: 10,
+		IdleConnTimeout:     90 * time.Second,
 	}
-	serviceHTTPClient = client
+	serviceHTTPClient = &http.Client{
+		Timeout:   30 * time.Second,
+		Transport: transport,
+	}
 	return &BalanceService{}
 }
 

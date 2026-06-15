@@ -9,7 +9,7 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// SubGroupManager manages weighted round-robin selection for all aggregate groups
+// SubGroupManager 加权轮询选择子分组
 type SubGroupManager struct {
 	store     store.Store
 	selectors map[uint]*selector
@@ -197,7 +197,7 @@ func (s *selector) selectNext() string {
 	return ""
 }
 
-// selectByWeight implements smooth weighted round-robin algorithm
+// selectByWeight 平滑加权轮询算法
 func (s *selector) selectByWeight() *subGroupItem {
 	totalWeight := 0
 	var best *subGroupItem
@@ -220,7 +220,7 @@ func (s *selector) selectByWeight() *subGroupItem {
 	return best
 }
 
-// hasActiveKeys checks if a sub-group has available API keys
+// hasActiveKeys 检查子分组是否有可用 key
 func (s *selector) hasActiveKeys(groupID uint) bool {
 	key := fmt.Sprintf("group:%d:active_keys", groupID)
 	length, err := s.store.LLen(key)

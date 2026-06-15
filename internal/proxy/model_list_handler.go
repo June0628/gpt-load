@@ -24,7 +24,7 @@ func shouldInterceptModelList(path string, method string) bool {
 		strings.Contains(path, "/v1beta/openai/v1/models")
 }
 
-// handleModelListResponse processes the model list response and applies filtering based on redirect rules
+// handleModelListResponse 处理模型列表响应并应用重定向规则
 func (ps *ProxyServer) handleModelListResponse(c *gin.Context, resp *http.Response, group *models.Group, channelHandler channel.ChannelProxy) {
 	defer resp.Body.Close()
 

@@ -33,7 +33,7 @@ type rootMessageErrorResponse struct {
 	Message string `json:"message"`
 }
 
-// ParseUpstreamError attempts to parse a structured error message from an upstream response body
+// ParseUpstreamError 解析上游响应中的结构化错误信息
 func ParseUpstreamError(body []byte) string {
 	// 1. Attempt to parse the standard OpenAI/Gemini format.
 	var stdErr standardErrorResponse

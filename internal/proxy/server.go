@@ -58,7 +58,7 @@ func NewProxyServer(
 	}, nil
 }
 
-// HandleProxy is the main entry point for proxy requests, refactored based on the stable .bak logic.
+// HandleProxy 代理请求入口
 func (ps *ProxyServer) HandleProxy(c *gin.Context) {
 	startTime := time.Now()
 	groupName := c.Param("group_name")
@@ -114,8 +114,7 @@ func (ps *ProxyServer) HandleProxy(c *gin.Context) {
 	ps.executeRequestWithRetry(c, channelHandler, originalGroup, group, finalBodyBytes, isStream, startTime, 0)
 }
 
-// executeRequestWithRetry handles requests and retries using a for loop
-// instead of recursion, avoiding potential stack overflow with deep retries.
+// executeRequestWithRetry 用 for 循环处理请求和重试，避免递归栈溢出
 func (ps *ProxyServer) executeRequestWithRetry(
 	c *gin.Context,
 	channelHandler channel.ChannelProxy,
@@ -341,7 +340,7 @@ func shouldFailoverOnStatusCode(statusCode int, group *models.Group) bool {
 	return group.FailoverStatusCodeMatcher.Match(statusCode)
 }
 
-// logRequest is a helper function to create and record a request log.
+// logRequest 记录请求日志
 func (ps *ProxyServer) logRequest(
 	c *gin.Context,
 	originalGroup *models.Group,

@@ -37,10 +37,7 @@ func (s *LogService) buildUnionSubQuery(tables []string) string {
 	return strings.Join(queryParts, " UNION ALL ")
 }
 
-// buildTableLatestKeysQuery 构建单个表的最新 key_hash 查询
-// 使用 MAX(timestamp) + GROUP BY 获取每个 key_hash 的最新记录
-// 使用 ? 占位符进行参数化查询，防止 SQL 注入
-// 返回 SQL 片段和对应的参数列表
+// buildTableLatestKeysQuery 构建单个表的最新 key_hash 查询（参数化防注入）
 func (s *LogService) buildTableLatestKeysQuery(c *gin.Context, table string) (string, []interface{}) {
 	var conditions []string
 	var args []interface{}
@@ -118,8 +115,7 @@ func (s *LogService) buildTableLatestKeysQuery(c *gin.Context, table string) (st
 	return sql, args
 }
 
-// BatchDecryptLogs 批量解密日志中的密钥，使用加密服务的批量解密方法
-// 使用指针切片避免值拷贝
+// BatchDecryptLogs 批量解密日志中的密钥
 func (s *LogService) BatchDecryptLogs(logs []*models.RequestLog) {
 	if len(logs) == 0 {
 		return
@@ -213,7 +209,7 @@ func (s *LogService) tableExists(tableName string) bool {
 	return s.DB.Migrator().HasTable(tableName)
 }
 
-// getExistingLogTables 批量查询存在的表，使用一次 SQL 查询验证多个表是否存在
+// getExistingLogTables 批量查询存在的表
 func (s *LogService) getExistingLogTables(tableNames []string) []string {
 	if len(tableNames) == 0 {
 		return nil
@@ -262,8 +258,7 @@ func (s *LogService) getEmptyLogsQuery() *gorm.DB {
 	return s.DB.Table(todayTable).Where("1 = 0")
 }
 
-// GetLogsQuery returns a GORM query for fetching logs with filters.
-// 支持跨多个按日期分表的日志表查询
+// GetLogsQuery 返回日志查询，支持跨日期分表
 func (s *LogService) GetLogsQuery(c *gin.Context) *gorm.DB {
 	// 获取时间范围用于确定查询哪些表
 	startTimeStr := c.Query("start_time")

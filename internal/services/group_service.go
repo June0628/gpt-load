@@ -533,7 +533,7 @@ func (s *GroupService) UpdateGroup(ctx context.Context, id uint, params GroupUpd
 	return &group, nil
 }
 
-// DeleteGroup removes a group and associated resources.
+// DeleteGroup 删除分组及相关资源
 func (s *GroupService) DeleteGroup(ctx context.Context, id uint) error {
 	var apiKeys []models.APIKey
 	if err := s.db.WithContext(ctx).Where("group_id = ?", id).Find(&apiKeys).Error; err != nil {
@@ -594,7 +594,7 @@ func (s *GroupService) DeleteGroup(ctx context.Context, id uint) error {
 	return nil
 }
 
-// CopyGroup duplicates a group and optionally copies active keys.
+// CopyGroup 复制分组并可选复制 key
 func (s *GroupService) CopyGroup(ctx context.Context, sourceGroupID uint, copyKeysOption string) (*models.Group, error) {
 	option := strings.TrimSpace(copyKeysOption)
 	if option == "" {
@@ -882,7 +882,7 @@ func (s *GroupService) GetGroupConfigOptions() ([]ConfigOption, error) {
 	return options, nil
 }
 
-// validateAndCleanConfig verifies GroupConfig overrides.
+// validateAndCleanConfig 验证 GroupConfig 覆盖
 func (s *GroupService) validateAndCleanConfig(configMap map[string]any) (map[string]any, error) {
 	if configMap == nil {
 		return nil, nil
@@ -933,7 +933,7 @@ func (s *GroupService) validateAndCleanConfig(configMap map[string]any) (map[str
 	return finalMap, nil
 }
 
-// normalizeHeaderRules deduplicates and normalises header rules.
+// normalizeHeaderRules 去重并规范化 header 规则
 func (s *GroupService) normalizeHeaderRules(rules []models.HeaderRule) (datatypes.JSON, error) {
 	if len(rules) == 0 {
 		return nil, nil
@@ -967,7 +967,7 @@ func (s *GroupService) normalizeHeaderRules(rules []models.HeaderRule) (datatype
 	return datatypes.JSON(headerRulesBytes), nil
 }
 
-// validateAndCleanUpstreams validates upstream definitions.
+// validateAndCleanUpstreams 验证上游定义
 func (s *GroupService) validateAndCleanUpstreams(upstreams json.RawMessage) (datatypes.JSON, error) {
 	if len(upstreams) == 0 {
 		return nil, NewI18nError(app_errors.ErrValidation, "validation.invalid_upstreams", map[string]any{"error": "upstreams field is required"})

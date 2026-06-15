@@ -61,8 +61,7 @@ func NewKeyService(db *gorm.DB, keyProvider *keypool.KeyProvider, keyValidator *
 	}
 }
 
-// AddMultipleKeys handles the business logic of creating new keys from a text block.
-// deprecated: use KeyImportService for large imports
+// AddMultipleKeys 批量添加 key（同步版本）
 func (s *KeyService) AddMultipleKeys(groupID uint, keysText string) (*AddKeysResult, error) {
 	keys := s.ParseKeysFromText(keysText)
 	if len(keys) > maxRequestKeys {
@@ -89,7 +88,7 @@ func (s *KeyService) AddMultipleKeys(groupID uint, keysText string) (*AddKeysRes
 	}, nil
 }
 
-// processAndCreateKeys is the lowest-level reusable function for adding keys.
+// processAndCreateKeys 底层批量添加 key 的复用函数
 func (s *KeyService) processAndCreateKeys(
 	groupID uint,
 	keys []string,
@@ -160,8 +159,7 @@ func (s *KeyService) processAndCreateKeys(
 	return addedCount, len(keys) - addedCount, nil
 }
 
-// ParseKeysFromText parses a string of keys from various formats into a string slice.
-// This function is exported to be shared with the handler layer.
+// ParseKeysFromText 解析文本中的 key 列表，支持 JSON 数组和分隔符分割
 func (s *KeyService) ParseKeysFromText(text string) []string {
 	var keys []string
 
@@ -200,7 +198,7 @@ func (s *KeyService) isValidKeyFormat(key string) bool {
 	return strings.TrimSpace(key) != ""
 }
 
-// RestoreMultipleKeys handles the business logic of restoring keys from a text block.
+// RestoreMultipleKeys 批量恢复 key
 func (s *KeyService) RestoreMultipleKeys(groupID uint, keysText string) (*RestoreKeysResult, error) {
 	keysToRestore := s.ParseKeysFromText(keysText)
 	if len(keysToRestore) > maxRequestKeys {
@@ -253,7 +251,7 @@ func (s *KeyService) ClearAllKeys(groupID uint) (int64, error) {
 	return s.KeyProvider.RemoveAllKeys(groupID)
 }
 
-// DeleteMultipleKeys handles the business logic of deleting keys from a text block.
+// DeleteMultipleKeys 批量删除 key
 func (s *KeyService) DeleteMultipleKeys(groupID uint, keysText string) (*DeleteKeysResult, error) {
 	keysToDelete := s.ParseKeysFromText(keysText)
 	if len(keysToDelete) > maxRequestKeys {
@@ -291,7 +289,7 @@ func (s *KeyService) DeleteMultipleKeys(groupID uint, keysText string) (*DeleteK
 	}, nil
 }
 
-// ListKeysInGroupQuery builds a query to list all keys within a specific group, filtered by status.
+// ListKeysInGroupQuery 构建分组 key 列表查询，支持状态过滤和搜索
 func (s *KeyService) ListKeysInGroupQuery(groupID uint, statusFilter string, searchHash string) *gorm.DB {
 	query := s.DB.Model(&models.APIKey{}).Where("group_id = ?", groupID)
 
@@ -313,7 +311,7 @@ func (s *KeyService) ListKeysInGroupQuery(groupID uint, statusFilter string, sea
 	return query
 }
 
-// TestMultipleKeys handles a one-off validation test for multiple keys.
+// TestMultipleKeys 同步验证多个 key
 func (s *KeyService) TestMultipleKeys(group *models.Group, keysText string) ([]keypool.KeyTestResult, error) {
 	keysToTest := s.ParseKeysFromText(keysText)
 	if len(keysToTest) > maxRequestKeys {
@@ -340,7 +338,7 @@ func (s *KeyService) TestMultipleKeys(group *models.Group, keysText string) ([]k
 	return allResults, nil
 }
 
-// StreamKeysToWriter fetches keys from the database in batches and writes them to the provided writer.
+// StreamKeysToWriter 批量流式写入解密后的 key
 func (s *KeyService) StreamKeysToWriter(groupID uint, statusFilter string, writer io.Writer) error {
 	query := s.DB.Model(&models.APIKey{}).Where("group_id = ?", groupID).Select("id, key_value")
 
