@@ -15,14 +15,14 @@ import (
 	"gorm.io/gorm"
 )
 
-// KeyTestResult holds the validation result for a single key.
+// KeyTestResult 保存单个密钥的验证结果
 type KeyTestResult struct {
 	KeyValue string `json:"key_value"`
 	IsValid  bool   `json:"is_valid"`
 	Error    string `json:"error,omitempty"`
 }
 
-// KeyValidator provides methods to validate API keys.
+// KeyValidator 提供验证API密钥的方法
 type KeyValidator struct {
 	DB              *gorm.DB
 	channelFactory  *channel.Factory
@@ -42,7 +42,12 @@ type KeyValidatorParams struct {
 	BalanceService  *balance.BalanceService
 }
 
-// NewKeyValidator creates a new KeyValidator.
+// GetBalanceService 获取余额查询服务
+func (v *KeyValidator) GetBalanceService() *balance.BalanceService {
+	return v.balanceService
+}
+
+// NewKeyValidator 创建一个新的KeyValidator
 func NewKeyValidator(params KeyValidatorParams) *KeyValidator {
 	return &KeyValidator{
 		DB:              params.DB,
@@ -54,7 +59,7 @@ func NewKeyValidator(params KeyValidatorParams) *KeyValidator {
 	}
 }
 
-// ValidateSingleKey performs a validation check on a single API key.
+// ValidateSingleKey 对单个API密钥执行验证检查
 func (s *KeyValidator) ValidateSingleKey(key *models.APIKey, group *models.Group) (bool, error) {
 	if group.EffectiveConfig.AppUrl == "" {
 		group.EffectiveConfig = s.SettingsManager.GetEffectiveConfig(group.Config)
@@ -113,11 +118,11 @@ func (s *KeyValidator) ValidateSingleKey(key *models.APIKey, group *models.Group
 	return true, nil
 }
 
-// TestMultipleKeys performs a synchronous validation for a list of key values within a specific group.
+// TestMultipleKeys 在指定分组内对密钥值列表执行同步验证
 func (s *KeyValidator) TestMultipleKeys(group *models.Group, keyValues []string) ([]KeyTestResult, error) {
 	results := make([]KeyTestResult, len(keyValues))
 
-	// Generate hashes for all key values
+	// 为所有密钥值生成哈希
 	var keyHashes []string
 	for _, keyValue := range keyValues {
 		keyHash := s.encryptionSvc.Hash(keyValue)
@@ -127,7 +132,7 @@ func (s *KeyValidator) TestMultipleKeys(group *models.Group, keyValues []string)
 		keyHashes = append(keyHashes, keyHash)
 	}
 
-	// Find which of the provided keys actually exist in the database for this group
+	// 查找提供的密钥中哪些在数据库中实际存在
 	var existingKeys []models.APIKey
 	if len(keyHashes) > 0 {
 		if err := s.DB.Where("group_id = ? AND key_hash IN ?", group.ID, keyHashes).Find(&existingKeys).Error; err != nil {
@@ -135,7 +140,7 @@ func (s *KeyValidator) TestMultipleKeys(group *models.Group, keyValues []string)
 		}
 	}
 
-	// Create a map of key_hash to APIKey for quick lookup
+	// 创建key_hash到APIKey的映射用于快速查找
 	existingKeyMap := make(map[string]models.APIKey)
 	for _, k := range existingKeys {
 		existingKeyMap[k.KeyHash] = k

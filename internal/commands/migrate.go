@@ -16,72 +16,72 @@ import (
 	"gorm.io/gorm"
 )
 
-// RunMigrateKeys handles the migrate-keys command entry point
+// RunMigrateKeys 处理 migrate-keys 命令入口
 func RunMigrateKeys(args []string) {
-	// Parse migrate-keys subcommand parameters
+	// 解析 migrate-keys 子命令参数
 	migrateCmd := flag.NewFlagSet("migrate-keys", flag.ExitOnError)
-	fromKey := migrateCmd.String("from", "", "Source encryption key (for decrypting existing data)")
-	toKey := migrateCmd.String("to", "", "Target encryption key (for encrypting new data)")
+	fromKey := migrateCmd.String("from", "", "源加密密钥（用于解密现有数据）")
+	toKey := migrateCmd.String("to", "", "目标加密密钥（用于加密新数据）")
 
-	// Set custom usage message
+	// 自定义使用说明
 	migrateCmd.Usage = func() {
-		fmt.Println("GPT-Load Key Migration Tool")
+		fmt.Println("GPT-Load 密钥迁移工具")
 		fmt.Println()
-		fmt.Println("Usage:")
-		fmt.Println("  Enable encryption: gpt-load migrate-keys --to new-key")
-		fmt.Println("  Disable encryption: gpt-load migrate-keys --from old-key")
-		fmt.Println("  Change key: gpt-load migrate-keys --from old-key --to new-key")
+		fmt.Println("用法:")
+		fmt.Println("  启用加密: gpt-load migrate-keys --to new-key")
+		fmt.Println("  禁用加密: gpt-load migrate-keys --from old-key")
+		fmt.Println("  更换密钥: gpt-load migrate-keys --from old-key --to new-key")
 		fmt.Println()
-		fmt.Println("Arguments:")
+		fmt.Println("参数:")
 		migrateCmd.PrintDefaults()
 		fmt.Println()
-		fmt.Println("⚠️  Important Notes:")
-		fmt.Println("  1. Always backup database before migration")
-		fmt.Println("  2. Stop service during migration")
-		fmt.Println("  3. Restart service after migration completes")
+		fmt.Println("⚠️  重要提示:")
+		fmt.Println("  1. 迁移前务必备份数据库")
+		fmt.Println("  2. 迁移期间请停止服务")
+		fmt.Println("  3. 迁移完成后重启服务")
 	}
 
-	// Parse parameters
+	// 解析参数
 	if err := migrateCmd.Parse(args); err != nil {
-		logrus.Fatalf("Parameter parsing failed: %v", err)
+		logrus.Fatalf("参数解析失败: %v", err)
 	}
 
-	// Check if help should be displayed
+	// 检查是否需要显示帮助
 	if len(args) == 0 || (*fromKey == "" && *toKey == "") {
 		migrateCmd.Usage()
 		os.Exit(0)
 	}
 
-	// Build dependency injection container
+	// 构建依赖注入容器
 	cont, err := container.BuildContainer()
 	if err != nil {
-		logrus.Fatalf("Failed to build container: %v", err)
+		logrus.Fatalf("构建容器失败: %v", err)
 	}
 
-	// Initialize global logger
+	// 初始化全局日志
 	if err := cont.Invoke(func(configManager types.ConfigManager) {
 		utils.SetupLogger(configManager)
 	}); err != nil {
-		logrus.Fatalf("Failed to setup logger: %v", err)
+		logrus.Fatalf("设置日志失败: %v", err)
 	}
 
-	// Execute migration command
+	// 执行迁移命令
 	if err := cont.Invoke(func(db *gorm.DB, configManager types.ConfigManager, cacheStore store.Store) {
 		migrateKeysCmd := NewMigrateKeysCommand(db, configManager, cacheStore, *fromKey, *toKey)
 		if err := migrateKeysCmd.Execute(); err != nil {
-			logrus.Fatalf("Key migration failed: %v", err)
+			logrus.Fatalf("密钥迁移失败: %v", err)
 		}
 	}); err != nil {
-		logrus.Fatalf("Failed to execute migration: %v", err)
+		logrus.Fatalf("执行迁移失败: %v", err)
 	}
 
-	logrus.Info("Key migration command completed")
+	logrus.Info("密钥迁移命令完成")
 }
 
-// Migration batch size configuration
+// 迁移批处理大小
 const migrationBatchSize = 1000
 
-// MigrateKeysCommand handles encryption key migration
+// MigrateKeysCommand 密钥迁移命令
 type MigrateKeysCommand struct {
 	db            *gorm.DB
 	configManager types.ConfigManager
@@ -90,7 +90,7 @@ type MigrateKeysCommand struct {
 	toKey         string
 }
 
-// NewMigrateKeysCommand creates a new migration command
+// NewMigrateKeysCommand 创建迁移命令实例
 func NewMigrateKeysCommand(db *gorm.DB, configManager types.ConfigManager, cacheStore store.Store, fromKey, toKey string) *MigrateKeysCommand {
 	return &MigrateKeysCommand{
 		db:            db,
@@ -101,134 +101,133 @@ func NewMigrateKeysCommand(db *gorm.DB, configManager types.ConfigManager, cache
 	}
 }
 
-// Execute performs the key migration
+// Execute 执行密钥迁移
 func (cmd *MigrateKeysCommand) Execute() error {
 	db.HandleLegacyIndexes(cmd.db)
-	// pre. Database migration and repair
+	// 预处理：数据库迁移和修复
 	if err := cmd.db.AutoMigrate(&models.APIKey{}); err != nil {
-		return fmt.Errorf("database auto-migration failed: %w", err)
+		return fmt.Errorf("数据库自动迁移失败: %w", err)
 	}
 
-	// 1. Validate parameters and get scenario
+	// 1. 验证参数并获取迁移场景
 	scenario, err := cmd.validateAndGetScenario()
 	if err != nil {
-		return fmt.Errorf("parameter validation failed: %w", err)
+		return fmt.Errorf("参数验证失败: %w", err)
 	}
 
-	logrus.Infof("Starting key migration, scenario: %s", scenario)
+	logrus.Infof("开始密钥迁移，场景: %s", scenario)
 
-	// 2. Pre-check - verify current keys can decrypt all data
+	// 2. 预检查 - 验证当前密钥可解密所有数据
 	if err := cmd.preCheck(); err != nil {
-		return fmt.Errorf("pre-check failed: %w", err)
+		return fmt.Errorf("预检查失败: %w", err)
 	}
 
-	// 3. Migrate data to temporary columns
+	// 3. 迁移数据到临时列
 	if err := cmd.createBackupTableAndMigrate(); err != nil {
-		return fmt.Errorf("data migration failed: %w", err)
+		return fmt.Errorf("数据迁移失败: %w", err)
 	}
 
-	// 4. Verify temporary columns data integrity
+	// 4. 验证临时列数据完整性
 	if err := cmd.verifyTempColumns(); err != nil {
-		logrus.Errorf("Data verification failed: %v", err)
-		return fmt.Errorf("data verification failed: %w", err)
+		logrus.Errorf("数据验证失败: %v", err)
+		return fmt.Errorf("数据验证失败: %w", err)
 	}
 
-	// 5. Switch columns atomically
+	// 5. 原子切换列
 	if err := cmd.switchColumns(); err != nil {
-		logrus.Errorf("Column switch failed: %v", err)
-		return fmt.Errorf("column switch failed: %w", err)
+		logrus.Errorf("列切换失败: %v", err)
+		return fmt.Errorf("列切换失败: %w", err)
 	}
 
-	// 6. Clear cache
+	// 6. 清除缓存
 	if err := cmd.clearCache(); err != nil {
-		logrus.Warnf("Cache cleanup failed, recommend manual service restart: %v", err)
+		logrus.Warnf("缓存清理失败，建议手动重启服务: %v", err)
 	}
 
-	// 7. Clean up temporary table
+	// 7. 清理临时表
 	if err := cmd.dropTempTable(); err != nil {
-		logrus.Warnf("Temporary table cleanup failed, can manually drop temp_migration table: %v", err)
+		logrus.Warnf("临时表清理失败，可手动删除 temp_migration 表: %v", err)
 	}
 
-	logrus.Info("Key migration completed successfully!")
-	logrus.Info("Recommend restarting service to ensure all cached data is loaded correctly")
+	logrus.Info("密钥迁移成功完成！")
+	logrus.Info("建议重启服务以确保所有缓存数据正确加载")
 
 	return nil
 }
 
-// validateAndGetScenario validates parameters and returns migration scenario
+// validateAndGetScenario 验证参数并返回迁移场景
 func (cmd *MigrateKeysCommand) validateAndGetScenario() (string, error) {
 	hasFrom := cmd.fromKey != ""
 	hasTo := cmd.toKey != ""
 
 	switch {
 	case !hasFrom && hasTo:
-		// Enable encryption
-		utils.ValidatePasswordStrength(cmd.toKey, "new encryption key")
-		return "enable encryption", nil
+		// 启用加密
+		utils.ValidatePasswordStrength(cmd.toKey, "新加密密钥")
+		return "启用加密", nil
 	case hasFrom && !hasTo:
-		// Disable encryption
-		return "disable encryption", nil
+		// 禁用加密
+		return "禁用加密", nil
 	case hasFrom && hasTo:
-		// Change encryption key
+		// 更换加密密钥
 		if cmd.fromKey == cmd.toKey {
-			return "", fmt.Errorf("new and old keys cannot be the same")
+			return "", fmt.Errorf("新旧密钥不能相同")
 		}
-		utils.ValidatePasswordStrength(cmd.toKey, "new encryption key")
-		return "change encryption key", nil
+		utils.ValidatePasswordStrength(cmd.toKey, "新加密密钥")
+		return "更换加密密钥", nil
 	default:
-		return "", fmt.Errorf("must specify --from or --to parameter, or both")
+		return "", fmt.Errorf("必须指定 --from 或 --to 参数，或两者都指定")
 	}
 }
 
-// preCheck verifies if current data can be processed correctly
+// preCheck 验证当前数据是否可正确处理
 func (cmd *MigrateKeysCommand) preCheck() error {
-	logrus.Info("Executing pre-check...")
+	logrus.Info("执行预检查...")
 
-	// Critical check: if enabling encryption (fromKey is empty), ensure data is not already encrypted
+	// 关键检查：启用加密时（fromKey为空），确保数据未被加密
 	if cmd.fromKey == "" && cmd.toKey != "" {
 		if err := cmd.detectIfAlreadyEncrypted(); err != nil {
 			return err
 		}
 	}
 
-	// Get current encryption service based on parameters only
+	// 根据参数创建当前加密服务
 	var currentService encryption.Service
 	var err error
 
 	if cmd.fromKey != "" {
-		// Use fromKey to create encryption service for verification
+		// 使用 fromKey 创建加密服务进行验证
 		currentService, err = encryption.NewService(cmd.fromKey)
 	} else {
-		// Enable encryption scenario: data should be unencrypted
-		// Use noop service to verify data is not encrypted
+		// 启用加密场景：数据应未加密，使用空服务验证
 		currentService, err = encryption.NewService("")
 	}
 
 	if err != nil {
-		return fmt.Errorf("failed to create current encryption service: %w", err)
+		return fmt.Errorf("创建当前加密服务失败: %w", err)
 	}
 
-	// Check number of keys in database
+	// 检查数据库中的密钥数量
 	var totalCount int64
 	if err := cmd.db.Model(&models.APIKey{}).Count(&totalCount).Error; err != nil {
-		return fmt.Errorf("failed to get total key count: %w", err)
+		return fmt.Errorf("获取密钥总数失败: %w", err)
 	}
 
 	if totalCount == 0 {
-		logrus.Info("No key data in database, skipping pre-check")
+		logrus.Info("数据库中无密钥数据，跳过预检查")
 		return nil
 	}
 
-	logrus.Infof("Starting validation of %d keys...", totalCount)
+	logrus.Infof("开始验证 %d 个密钥...", totalCount)
 
-	// Batch verify all keys can be decrypted correctly
+	// 批量验证所有密钥可正确解密
 	offset := 0
 	failedCount := 0
 
 	for {
 		var keys []models.APIKey
 		if err := cmd.db.Order("id").Offset(offset).Limit(migrationBatchSize).Find(&keys).Error; err != nil {
-			return fmt.Errorf("failed to get key data: %w", err)
+			return fmt.Errorf("获取密钥数据失败: %w", err)
 		}
 
 		if len(keys) == 0 {
@@ -238,81 +237,82 @@ func (cmd *MigrateKeysCommand) preCheck() error {
 		for _, key := range keys {
 			_, err := currentService.Decrypt(key.KeyValue)
 			if err != nil {
-				logrus.Errorf("Key ID %d decryption failed: %v", key.ID, err)
+				logrus.Errorf("密钥 ID %d 解密失败: %v", key.ID, err)
 				failedCount++
 			}
 		}
 
 		offset += migrationBatchSize
-		// Ensure we don't display more than total count
+		// 确保不显示超过总数
 		actualVerified := offset
 		if int64(offset) > totalCount {
 			actualVerified = int(totalCount)
 		}
-		logrus.Infof("Verified %d/%d keys", actualVerified, totalCount)
+		logrus.Infof("已验证 %d/%d 个密钥", actualVerified, totalCount)
 	}
 
 	if failedCount > 0 {
-		return fmt.Errorf("found %d keys that cannot be decrypted, please check the --from parameter", failedCount)
+		return fmt.Errorf("发现 %d 个密钥无法解密，请检查 --from 参数", failedCount)
 	}
 
-	logrus.Info("Pre-check passed, all keys verified successfully")
+	logrus.Info("预检查通过，所有密钥验证成功")
 	return nil
 }
 
-// detectIfAlreadyEncrypted checks if data is already encrypted to prevent double encryption
+// detectIfAlreadyEncrypted 检测数据是否已加密，防止重复加密
 func (cmd *MigrateKeysCommand) detectIfAlreadyEncrypted() error {
-	logrus.Info("Detecting if data is already encrypted...")
+	logrus.Info("检测数据是否已加密...")
 
-	// Sample check
+	// 抽样检查
 	var sampleKeys []models.APIKey
 	if err := cmd.db.Limit(20).Where("key_hash IS NOT NULL AND key_hash != ''").Find(&sampleKeys).Error; err != nil {
-		return fmt.Errorf("failed to fetch sample keys: %w", err)
+		return fmt.Errorf("获取样本密钥失败: %w", err)
 	}
 
 	if len(sampleKeys) == 0 {
-		logrus.Info("No keys found in database, safe to proceed")
+		logrus.Info("数据库中未找到密钥，可安全继续")
 		return nil
 	}
 
-	// 1. Hash consistency check
-	// If data is unencrypted, key_hash should equal SHA256(key_value)
+	// 1. 哈希一致性检查
+	// 若数据未加密，key_hash 应等于 SHA256(key_value)
 	hashConsistentCount := 0
-	noopService, err := encryption.NewService("") // SHA256 service for unencrypted data
+	noopService, err := encryption.NewService("") // SHA256 服务用于未加密数据
 	if err != nil {
-		return fmt.Errorf("failed to create noop service: %w", err)
+		return fmt.Errorf("创建空服务失败: %w", err)
 	}
 
 	for _, key := range sampleKeys {
-		// For unencrypted data: key_hash should match SHA256(key_value)
+		// 未加密数据：key_hash 应匹配 SHA256(key_value)
 		expectedHash := noopService.Hash(key.KeyValue)
 		if expectedHash == key.KeyHash {
 			hashConsistentCount++
 		}
 	}
 
-	// 2. Analyze results
+	// 2. 分析结果
 	if hashConsistentCount == len(sampleKeys) {
-		// All hashes match SHA256(key_value) - data is unencrypted
-		logrus.Info("Hash check passed: Data appears to be unencrypted (SHA256 hashes match)")
-		return nil // Safe to proceed with encryption
+		// 所有哈希匹配 SHA256(key_value) - 数据未加密
+		logrus.Info("哈希检查通过：数据似乎未加密（SHA256 哈希匹配）")
+		return nil // 可安全继续加密
+
 	}
 
 	if hashConsistentCount == 0 {
-		// No hashes match SHA256(key_value) - data is already encrypted!
+		// 无哈希匹配 SHA256(key_value) - 数据已加密！
 
-		// 3. Further check: can we decrypt with target key?
+		// 3. 进一步检查：能否用目标密钥解密？
 		if cmd.toKey != "" {
 			targetService, err := encryption.NewService(cmd.toKey)
 			if err != nil {
-				return fmt.Errorf("failed to create target encryption service: %w", err)
+				return fmt.Errorf("创建目标加密服务失败: %w", err)
 			}
 
 			canDecryptCount := 0
 			for _, key := range sampleKeys {
 				decrypted, err := targetService.Decrypt(key.KeyValue)
 				if err == nil {
-					// Verify hash matches
+					// 验证哈希匹配
 					expectedHash := targetService.Hash(decrypted)
 					if expectedHash == key.KeyHash {
 						canDecryptCount++
@@ -322,7 +322,7 @@ func (cmd *MigrateKeysCommand) detectIfAlreadyEncrypted() error {
 
 			if canDecryptCount > 0 {
 				return fmt.Errorf(
-					"CRITICAL: Data is already encrypted with the target key! %d/%d keys can be decrypted with target key",
+					"严重：数据已使用目标密钥加密！%d/%d 个密钥可用目标密钥解密",
 					canDecryptCount,
 					len(sampleKeys),
 				)
@@ -330,14 +330,14 @@ func (cmd *MigrateKeysCommand) detectIfAlreadyEncrypted() error {
 		}
 
 		return fmt.Errorf(
-			"CRITICAL: Data appears to be already encrypted! 0/%d keys have matching SHA256 hashes (expected for unencrypted data)",
+			"严重：数据似乎已加密！0/%d 个密钥的 SHA256 哈希匹配（未加密数据应有的状态）",
 			len(sampleKeys),
 		)
 	}
 
-	// Partial match - inconsistent data state
+	// 部分匹配 - 数据状态不一致
 	return fmt.Errorf(
-		"WARNING: Inconsistent data state detected! %d/%d keys appear unencrypted (SHA256 hash matches), %d/%d keys appear encrypted (SHA256 hash doesn't match)",
+		"警告：检测到数据状态不一致！%d/%d 个密钥似乎未加密（SHA256 哈希匹配），%d/%d 个密钥似乎已加密（SHA256 哈希不匹配）",
 		hashConsistentCount,
 		len(sampleKeys),
 		len(sampleKeys)-hashConsistentCount,
@@ -345,76 +345,76 @@ func (cmd *MigrateKeysCommand) detectIfAlreadyEncrypted() error {
 	)
 }
 
-// createBackupTableAndMigrate performs migration using temporary table
+// createBackupTableAndMigrate 使用临时表执行迁移
 func (cmd *MigrateKeysCommand) createBackupTableAndMigrate() error {
-	logrus.Info("Starting key migration using temporary table...")
+	logrus.Info("开始使用临时表进行密钥迁移...")
 
-	// 1. Create temporary table
+	// 1. 创建临时表
 	if err := cmd.createTempTable(); err != nil {
-		return fmt.Errorf("failed to create temporary table: %w", err)
+		return fmt.Errorf("创建临时表失败: %w", err)
 	}
 
-	// 2. Create old and new encryption services
+	// 2. 创建新旧加密服务
 	oldService, newService, err := cmd.createMigrationServices()
 	if err != nil {
 		return err
 	}
 
-	// 3. Get total count to migrate
+	// 3. 获取待迁移总数
 	var totalCount int64
 	if err := cmd.db.Model(&models.APIKey{}).Count(&totalCount).Error; err != nil {
-		return fmt.Errorf("failed to get key count: %w", err)
+		return fmt.Errorf("获取密钥数量失败: %w", err)
 	}
 
 	if totalCount == 0 {
-		logrus.Info("No keys to migrate")
+		logrus.Info("无需迁移的密钥")
 		return nil
 	}
 
-	logrus.Infof("Starting migration of %d keys...", totalCount)
+	logrus.Infof("开始迁移 %d 个密钥...", totalCount)
 
-	// 4. Process migration in batches
+	// 4. 分批处理迁移
 	processedCount := 0
 	lastID := uint(0)
 
 	for {
 		var keys []models.APIKey
-		// Use ID-based pagination for stable results
+		// 使用基于 ID 的分页确保结果稳定
 		if err := cmd.db.Where("id > ?", lastID).Order("id").Limit(migrationBatchSize).Find(&keys).Error; err != nil {
-			return fmt.Errorf("failed to get key data: %w", err)
+			return fmt.Errorf("获取密钥数据失败: %w", err)
 		}
 
 		if len(keys) == 0 {
 			break
 		}
 
-		// Process current batch to temp table
+		// 处理当前批次到临时表
 		if err := cmd.processBatchToTempTable(keys, oldService, newService); err != nil {
-			return fmt.Errorf("failed to process batch data: %w", err)
+			return fmt.Errorf("处理批次数据失败: %w", err)
 		}
 
 		processedCount += len(keys)
 		lastID = keys[len(keys)-1].ID
-		logrus.Infof("Processed %d/%d keys", processedCount, totalCount)
+		logrus.Infof("已处理 %d/%d 个密钥", processedCount, totalCount)
 	}
 
-	logrus.Info("Data migration to temporary table completed")
+	logrus.Info("数据迁移到临时表完成")
 	return nil
 }
 
-// createTempTable creates a temporary table for migration
+// createTempTable 创建迁移临时表
 func (cmd *MigrateKeysCommand) createTempTable() error {
-	logrus.Info("Creating temporary migration table...")
+	logrus.Info("创建临时迁移表...")
 
-	// Drop existing temp table if exists
+	// 删除已存在的临时表
 	if err := cmd.db.Exec("DROP TABLE IF EXISTS temp_migration").Error; err != nil {
-		logrus.WithError(err).Warn("Failed to drop existing temp table, continuing anyway")
+		logrus.WithError(err).Warn("删除临时表失败，继续执行")
 	}
 
 	dbType := cmd.db.Dialector.Name()
 	var createTableSQL string
 
-	// Use database-specific syntax for better compatibility
+	// 使用数据库特定语法以获得更好的兼容性
 	switch dbType {
 	case "mysql":
 		createTableSQL = `
@@ -433,7 +433,7 @@ func (cmd *MigrateKeysCommand) createTempTable() error {
 			)
 		`
 	case "sqlite":
-		// SQLite uses INTEGER for primary key
+		// SQLite 使用 INTEGER 作为主键
 		createTableSQL = `
 			CREATE TABLE temp_migration (
 				id INTEGER PRIMARY KEY,
@@ -442,7 +442,7 @@ func (cmd *MigrateKeysCommand) createTempTable() error {
 			)
 		`
 	default:
-		// Fallback to generic syntax
+		// 回退到通用语法
 		createTableSQL = `
 			CREATE TABLE temp_migration (
 				id INTEGER PRIMARY KEY,
@@ -452,69 +452,66 @@ func (cmd *MigrateKeysCommand) createTempTable() error {
 		`
 	}
 
-	// Create temp table with minimal structure
+	// 创建最小结构的临时表
 	if err := cmd.db.Exec(createTableSQL).Error; err != nil {
-		return fmt.Errorf("failed to create temp_migration table: %w", err)
+		return fmt.Errorf("创建 temp_migration 表失败: %w", err)
 	}
 
-	// Create index for better UPDATE performance (not needed for PRIMARY KEY but helps with JOIN)
-	// Skip index creation since id is already PRIMARY KEY which creates an implicit index
+	// 主键已隐式创建索引，无需额外创建
 
 	return nil
 }
 
-// dropTempTable removes the temporary migration table
+// dropTempTable 删除临时迁移表
 func (cmd *MigrateKeysCommand) dropTempTable() error {
-	logrus.Info("Dropping temporary migration table...")
+	logrus.Info("删除临时迁移表...")
 
 	if err := cmd.db.Exec("DROP TABLE IF EXISTS temp_migration").Error; err != nil {
-		return fmt.Errorf("failed to drop temp_migration table: %w", err)
+		return fmt.Errorf("删除 temp_migration 表失败: %w", err)
 	}
 
-	logrus.Info("Temporary table dropped successfully")
+	logrus.Info("临时表删除成功")
 	return nil
 }
 
-// createMigrationServices creates old and new encryption services for migration
+// createMigrationServices 创建迁移用的新旧加密服务
 func (cmd *MigrateKeysCommand) createMigrationServices() (oldService, newService encryption.Service, err error) {
-	// Create old encryption service (for decryption) based on parameters only
+	// 根据参数创建旧加密服务（用于解密）
 	if cmd.fromKey != "" {
-		// Decrypt with specified key
+		// 使用指定密钥解密
 		oldService, err = encryption.NewService(cmd.fromKey)
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to create old encryption service: %w", err)
+			return nil, nil, fmt.Errorf("创建旧加密服务失败: %w", err)
 		}
 	} else {
-		// Enable encryption scenario: data should be unencrypted
-		// Use noop service (empty key means no encryption)
+		// 启用加密场景：数据应未加密，使用空服务（空密钥=不加密）
 		oldService, err = encryption.NewService("")
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to create noop encryption service for source: %w", err)
+			return nil, nil, fmt.Errorf("创建源空加密服务失败: %w", err)
 		}
 	}
 
-	// Create new encryption service (for encryption) based on parameters only
+	// 根据参数创建新加密服务（用于加密）
 	if cmd.toKey != "" {
-		// Encrypt with specified key
+		// 使用指定密钥加密
 		newService, err = encryption.NewService(cmd.toKey)
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to create new encryption service: %w", err)
+			return nil, nil, fmt.Errorf("创建新加密服务失败: %w", err)
 		}
 	} else {
-		// Disable encryption scenario: data should be unencrypted
-		// Use noop service (empty key means no encryption)
+		// 禁用加密场景：数据应未加密，使用空服务（空密钥=不加密）
 		newService, err = encryption.NewService("")
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to create noop encryption service for target: %w", err)
+			return nil, nil, fmt.Errorf("创建目标空加密服务失败: %w", err)
 		}
 	}
 
 	return oldService, newService, nil
 }
 
-// processBatchToTempTable processes a batch of keys and writes to temporary table
+// processBatchToTempTable 处理一批密钥并写入临时表
 func (cmd *MigrateKeysCommand) processBatchToTempTable(keys []models.APIKey, oldService, newService encryption.Service) error {
-	// Prepare batch data for insertion
+	// 准备待插入的批量数据
 	type TempMigration struct {
 		ID          uint   `gorm:"primaryKey"`
 		KeyValueNew string `gorm:"column:key_value_new"`
@@ -524,19 +521,19 @@ func (cmd *MigrateKeysCommand) processBatchToTempTable(keys []models.APIKey, old
 	var tempRecords []TempMigration
 
 	for _, key := range keys {
-		// 1. Decrypt using old service
+		// 1. 使用旧服务解密
 		decrypted, err := oldService.Decrypt(key.KeyValue)
 		if err != nil {
-			return fmt.Errorf("key ID %d decryption failed: %w", key.ID, err)
+			return fmt.Errorf("密钥 ID %d 解密失败: %w", key.ID, err)
 		}
 
-		// 2. Encrypt using new service
+		// 2. 使用新服务加密
 		encrypted, err := newService.Encrypt(decrypted)
 		if err != nil {
-			return fmt.Errorf("key ID %d encryption failed: %w", key.ID, err)
+			return fmt.Errorf("密钥 ID %d 加密失败: %w", key.ID, err)
 		}
 
-		// 3. Generate new hash using new service
+		// 3. 使用新服务生成新哈希
 		newHash := newService.Hash(decrypted)
 
 		tempRecords = append(tempRecords, TempMigration{
@@ -546,20 +543,20 @@ func (cmd *MigrateKeysCommand) processBatchToTempTable(keys []models.APIKey, old
 		})
 	}
 
-	// Insert batch into temp table in a transaction
+	// 在事务中批量插入临时表
 	return cmd.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Table("temp_migration").Create(&tempRecords).Error; err != nil {
-			return fmt.Errorf("failed to insert batch into temp_migration: %w", err)
+			return fmt.Errorf("批量插入 temp_migration 失败: %w", err)
 		}
 		return nil
 	})
 }
 
-// verifyTempColumns verifies temporary table data integrity
+// verifyTempColumns 验证临时表数据完整性
 func (cmd *MigrateKeysCommand) verifyTempColumns() error {
-	logrus.Info("Verifying temporary table data integrity...")
+	logrus.Info("验证临时表数据完整性...")
 
-	// Create new encryption service for verification
+	// 创建验证用的新加密服务
 	var newService encryption.Service
 	var err error
 
@@ -570,30 +567,30 @@ func (cmd *MigrateKeysCommand) verifyTempColumns() error {
 	}
 
 	if err != nil {
-		return fmt.Errorf("failed to create verification encryption service: %w", err)
+		return fmt.Errorf("创建验证加密服务失败: %w", err)
 	}
 
-	// Get total count
+	// 获取总数
 	var totalCount int64
 	if err := cmd.db.Model(&models.APIKey{}).Count(&totalCount).Error; err != nil {
-		return fmt.Errorf("failed to get key count: %w", err)
+		return fmt.Errorf("获取密钥数量失败: %w", err)
 	}
 
 	if totalCount == 0 {
 		return nil
 	}
 
-	// Verify temporary table has been populated
+	// 验证临时表已填充
 	var migratedCount int64
 	if err := cmd.db.Table("temp_migration").Count(&migratedCount).Error; err != nil {
-		return fmt.Errorf("failed to count migrated keys: %w", err)
+		return fmt.Errorf("统计已迁移密钥失败: %w", err)
 	}
 
 	if migratedCount != totalCount {
-		return fmt.Errorf("migration incomplete: %d/%d keys migrated", migratedCount, totalCount)
+		return fmt.Errorf("迁移不完整: %d/%d 个密钥已迁移", migratedCount, totalCount)
 	}
 
-	// Verify a sample of keys can be decrypted correctly
+	// 验证样本密钥可正确解密
 	verifiedCount := 0
 	for {
 		var keys []struct {
@@ -602,7 +599,7 @@ func (cmd *MigrateKeysCommand) verifyTempColumns() error {
 		}
 
 		if err := cmd.db.Table("temp_migration").Select("id, key_value_new").Order("id").Limit(100).Offset(verifiedCount).Scan(&keys).Error; err != nil {
-			return fmt.Errorf("failed to get keys for verification: %w", err)
+			return fmt.Errorf("获取验证密钥失败: %w", err)
 		}
 
 		if len(keys) == 0 {
@@ -612,23 +609,23 @@ func (cmd *MigrateKeysCommand) verifyTempColumns() error {
 		for _, key := range keys {
 			_, err := newService.Decrypt(key.KeyValueNew)
 			if err != nil {
-				return fmt.Errorf("key ID %d verification failed: invalid temporary column data: %w", key.ID, err)
+				return fmt.Errorf("密钥 ID %d 验证失败: 临时列数据无效: %w", key.ID, err)
 			}
 		}
 
 		verifiedCount += len(keys)
-		if verifiedCount >= int(totalCount) || verifiedCount >= 1000 { // Verify max 1000 keys for performance
+		if verifiedCount >= int(totalCount) || verifiedCount >= 1000 { // 为性能最多验证1000个密钥
 			break
 		}
 	}
 
-	logrus.Infof("Verified %d keys successfully", verifiedCount)
+	logrus.Infof("成功验证 %d 个密钥", verifiedCount)
 	return nil
 }
 
-// switchColumns performs atomic update from temporary table to original table
+// switchColumns 从临时表原子更新到原始表
 func (cmd *MigrateKeysCommand) switchColumns() error {
-	logrus.Info("Updating original table from temporary table...")
+	logrus.Info("从临时表更新原始表...")
 
 	dbType := cmd.db.Dialector.Name()
 
@@ -637,7 +634,7 @@ func (cmd *MigrateKeysCommand) switchColumns() error {
 
 		switch dbType {
 		case "mysql":
-			// MySQL uses JOIN syntax for cross-table UPDATE
+			// MySQL 使用 JOIN 语法进行跨表 UPDATE
 			updateSQL = `
 				UPDATE api_keys a
 				INNER JOIN temp_migration t ON a.id = t.id
@@ -646,7 +643,7 @@ func (cmd *MigrateKeysCommand) switchColumns() error {
 			`
 
 		case "postgres":
-			// PostgreSQL uses FROM clause for cross-table UPDATE
+			// PostgreSQL 使用 FROM 子句进行跨表 UPDATE
 			updateSQL = `
 				UPDATE api_keys
 				SET key_value = t.key_value_new,
@@ -656,7 +653,7 @@ func (cmd *MigrateKeysCommand) switchColumns() error {
 			`
 
 		case "sqlite":
-			// SQLite uses subquery for cross-table UPDATE (compatible with all versions)
+			// SQLite 使用子查询进行跨表 UPDATE（兼容所有版本）
 			updateSQL = `
 				UPDATE api_keys
 				SET key_value = (SELECT key_value_new FROM temp_migration WHERE temp_migration.id = api_keys.id),
@@ -665,33 +662,33 @@ func (cmd *MigrateKeysCommand) switchColumns() error {
 			`
 
 		default:
-			return fmt.Errorf("unsupported database type: %s", dbType)
+			return fmt.Errorf("不支持的数据库类型: %s", dbType)
 		}
 
-		logrus.Infof("Executing cross-table UPDATE for %s...", dbType)
+		logrus.Infof("执行 %s 跨表 UPDATE...", dbType)
 		if err := tx.Exec(updateSQL).Error; err != nil {
-			return fmt.Errorf("failed to update api_keys from temp_migration: %w", err)
+			return fmt.Errorf("从 temp_migration 更新 api_keys 失败: %w", err)
 		}
 
-		logrus.Info("Successfully updated original table with migrated data")
+		logrus.Info("成功使用迁移数据更新原始表")
 		return nil
 	})
 }
 
-// clearCache cleans cache
+// clearCache 清除缓存
 func (cmd *MigrateKeysCommand) clearCache() error {
-	logrus.Info("Starting cache cleanup...")
+	logrus.Info("开始缓存清理...")
 
 	if cmd.cacheStore == nil {
-		logrus.Info("No cache storage configured, skipping cache cleanup")
+		logrus.Info("未配置缓存存储，跳过缓存清理")
 		return nil
 	}
 
-	logrus.Info("Executing cache cleanup...")
+	logrus.Info("执行缓存清理...")
 	if err := cmd.cacheStore.Clear(); err != nil {
-		return fmt.Errorf("cache cleanup failed: %w", err)
+		return fmt.Errorf("缓存清理失败: %w", err)
 	}
 
-	logrus.Info("Cache cleanup successful")
+	logrus.Info("缓存清理成功")
 	return nil
 }

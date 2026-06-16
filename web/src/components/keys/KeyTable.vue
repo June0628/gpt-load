@@ -26,9 +26,10 @@ import {
   NSpace,
   NSpin,
   useDialog,
+  type DropdownOption,
   type MessageReactive,
 } from "naive-ui";
-import { h, ref, watch } from "vue";
+import { computed, h, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import KeyCreateDialog from "./KeyCreateDialog.vue";
 import KeyDeleteDialog from "./KeyDeleteDialog.vue";
@@ -64,27 +65,41 @@ const statusOptions = [
 ];
 
 // 更多操作下拉菜单选项
-const moreOptions = [
-  { label: t("keys.exportAllKeys"), key: "copyAll" },
-  { label: t("keys.exportValidKeys"), key: "copyValid" },
-  { label: t("keys.exportInvalidKeys"), key: "copyInvalid" },
-  { type: "divider" },
-  { label: t("keys.restoreAllInvalidKeys"), key: "restoreAll" },
-  {
-    label: t("keys.clearAllInvalidKeys"),
-    key: "clearInvalid",
-    props: { style: { color: "#d03050" } },
-  },
-  {
-    label: t("keys.clearAllKeys"),
-    key: "clearAll",
-    props: { style: { color: "red", fontWeight: "bold" } },
-  },
-  { type: "divider" },
-  { label: t("keys.validateAllKeys"), key: "validateAll" },
-  { label: t("keys.validateValidKeys"), key: "validateActive" },
-  { label: t("keys.validateInvalidKeys"), key: "validateInvalid" },
-];
+const moreOptions = computed(() => {
+  const divider = { type: "divider" as const };
+  const options: DropdownOption[] = [
+    { label: t("keys.exportAllKeys"), key: "copyAll" },
+    { label: t("keys.exportValidKeys"), key: "copyValid" },
+    { label: t("keys.exportInvalidKeys"), key: "copyInvalid" },
+  ];
+
+  // 仅当分组开启余额查询时才显示"立即查询"按钮
+  if (props.selectedGroup?.balance_query_config?.enabled) {
+    options.push(divider);
+    options.push({ label: t("keys.queryBalance"), key: "queryBalance" });
+  }
+
+  options.push(
+    divider,
+    { label: t("keys.restoreAllInvalidKeys"), key: "restoreAll" },
+    {
+      label: t("keys.clearAllInvalidKeys"),
+      key: "clearInvalid",
+      props: { style: { color: "#d03050" } },
+    },
+    {
+      label: t("keys.clearAllKeys"),
+      key: "clearAll",
+      props: { style: { color: "red", fontWeight: "bold" } },
+    },
+    divider,
+    { label: t("keys.validateAllKeys"), key: "validateAll" },
+    { label: t("keys.validateValidKeys"), key: "validateActive" },
+    { label: t("keys.validateInvalidKeys"), key: "validateInvalid" },
+  );
+
+  return options;
+});
 
 let testingMsg: MessageReactive | null = null;
 const isDeling = ref(false);
@@ -168,6 +183,9 @@ function handleMoreAction(key: string) {
       break;
     case "copyInvalid":
       copyInvalidKeys();
+      break;
+    case "queryBalance":
+      queryBalance();
       break;
     case "restoreAll":
       restoreAllInvalid();
@@ -541,6 +559,20 @@ async function clearAllInvalid() {
       }
     },
   });
+}
+
+async function queryBalance() {
+  if (!props.selectedGroup?.id) {
+    return;
+  }
+
+  try {
+    await keysApi.queryGroupBalance(props.selectedGroup.id);
+    window.$message.success(t("keys.balanceQueryStarted"));
+  } catch (error) {
+    console.error("Failed to query balance:", error);
+    window.$message.error(t("keys.balanceQueryFailed"));
+  }
 }
 
 async function clearAll() {

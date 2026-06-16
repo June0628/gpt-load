@@ -66,6 +66,7 @@ const configOptions = ref<GroupConfigOption[]>([]);
 const showProxyKeys = ref(false);
 const parentAggregateGroups = ref<ParentAggregateGroup[]>([]);
 
+
 const proxyKeysDisplay = computed(() => {
   if (!props.group?.proxy_keys) {
     return "-";
@@ -495,6 +496,7 @@ function resetPage() {
                       </n-tooltip>
                     </div>
                     <span v-else class="no-balance">{{ t("keys.noBalanceInfo") }}</span>
+
                   </div>
                 </template>
               </n-statistic>

@@ -12,25 +12,25 @@ import (
 	"gorm.io/gorm"
 )
 
-// SubGroupInput defines the input payload for aggregate group member configuration.
+// SubGroupInput 定义聚合分组成员配置的输入参数
 type SubGroupInput struct {
 	GroupID uint `json:"group_id"`
 	Weight  int  `json:"weight"`
 }
 
-// AggregateValidationResult captures the normalized aggregate group parameters.
+// AggregateValidationResult 保存标准化后的聚合分组参数
 type AggregateValidationResult struct {
 	ValidationEndpoint string
 	SubGroups          []models.GroupSubGroup
 }
 
-// AggregateGroupService encapsulates aggregate group specific behaviours.
+// AggregateGroupService 封装聚合分组的特定行为
 type AggregateGroupService struct {
 	db           *gorm.DB
 	groupManager *GroupManager
 }
 
-// NewAggregateGroupService constructs an AggregateGroupService instance.
+// NewAggregateGroupService 创建 AggregateGroupService 实例
 func NewAggregateGroupService(db *gorm.DB, groupManager *GroupManager) *AggregateGroupService {
 	return &AggregateGroupService{
 		db:           db,
@@ -38,7 +38,7 @@ func NewAggregateGroupService(db *gorm.DB, groupManager *GroupManager) *Aggregat
 	}
 }
 
-// ValidateSubGroups validates sub-groups with an optional existing validation endpoint for consistency check.
+// ValidateSubGroups 验证子分组，支持与现有验证端点进行一致性检查
 func (s *AggregateGroupService) ValidateSubGroups(ctx context.Context, channelType string, inputs []SubGroupInput, existingEndpoint string) (*AggregateValidationResult, error) {
 	if len(inputs) == 0 {
 		return nil, NewI18nError(app_errors.ErrValidation, "validation.sub_groups_required", nil)
@@ -70,7 +70,7 @@ func (s *AggregateGroupService) ValidateSubGroups(ctx context.Context, channelTy
 	subGroupMap := make(map[uint]models.Group, len(subGroupModels))
 	var validationEndpoint string
 
-	// If there's an existing endpoint, use it as the expected endpoint
+	// 如果有现有端点，使用它作为期望的端点
 	if existingEndpoint != "" {
 		validationEndpoint = existingEndpoint
 	}
@@ -83,7 +83,7 @@ func (s *AggregateGroupService) ValidateSubGroups(ctx context.Context, channelTy
 			return nil, NewI18nError(app_errors.ErrValidation, "validation.sub_group_channel_mismatch", nil)
 		}
 
-		// If no existing endpoint, use the first sub-group's effective endpoint
+		// 如果没有现有端点，使用第一个子分组的有效端点
 		if validationEndpoint == "" {
 			validationEndpoint = utils.GetValidationEndpoint(&sg)
 		} else if validationEndpoint != utils.GetValidationEndpoint(&sg) {
@@ -109,7 +109,7 @@ func (s *AggregateGroupService) ValidateSubGroups(ctx context.Context, channelTy
 	}, nil
 }
 
-// GetSubGroups returns sub groups for an aggregate group with complete information
+// GetSubGroups 返回聚合分组的子分组完整信息
 func (s *AggregateGroupService) GetSubGroups(ctx context.Context, groupID uint) ([]models.SubGroupInfo, error) {
 	var group models.Group
 	if err := s.db.WithContext(ctx).First(&group, groupID).Error; err != nil {
@@ -169,7 +169,7 @@ func (s *AggregateGroupService) GetSubGroups(ctx context.Context, groupID uint) 
 	return subGroups, nil
 }
 
-// AddSubGroups adds new sub groups to an aggregate group
+// AddSubGroups 向聚合分组添加新的子分组
 func (s *AggregateGroupService) AddSubGroups(ctx context.Context, groupID uint, inputs []SubGroupInput) error {
 	var group models.Group
 	if err := s.db.WithContext(ctx).First(&group, groupID).Error; err != nil {
@@ -183,7 +183,7 @@ func (s *AggregateGroupService) AddSubGroups(ctx context.Context, groupID uint, 
 		return NewI18nError(app_errors.ErrBadRequest, "group.not_aggregate", nil)
 	}
 
-	// Check if there are existing sub groups and get their validation endpoint
+	// 检查是否有现有子分组并获取其验证端点
 	var existingEndpoint string
 	var existingSubGroups []models.GroupSubGroup
 	if err := s.db.WithContext(ctx).Where("group_id = ?", groupID).Find(&existingSubGroups).Error; err != nil {
@@ -197,13 +197,13 @@ func (s *AggregateGroupService) AddSubGroups(ctx context.Context, groupID uint, 
 		}
 	}
 
-	// Validate sub groups with existing endpoint for consistency
+	// 使用现有端点验证子分组的一致性
 	result, err := s.ValidateSubGroups(ctx, group.ChannelType, inputs, existingEndpoint)
 	if err != nil {
 		return err
 	}
 
-	// Check for duplicates with existing sub groups
+	// 检查与现有子分组的重复
 	existingSubGroupIDs := make(map[uint]bool)
 	for _, sg := range existingSubGroups {
 		existingSubGroupIDs[sg.SubGroupID] = true
@@ -216,7 +216,7 @@ func (s *AggregateGroupService) AddSubGroups(ctx context.Context, groupID uint, 
 		}
 	}
 
-	// Add new sub groups
+	// 添加新的子分组
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		for _, newSg := range result.SubGroups {
 			newSg.GroupID = groupID
@@ -240,7 +240,7 @@ func (s *AggregateGroupService) AddSubGroups(ctx context.Context, groupID uint, 
 	return nil
 }
 
-// UpdateSubGroupWeight updates the weight of a specific sub group
+// UpdateSubGroupWeight 更新指定子分组的权重
 func (s *AggregateGroupService) UpdateSubGroupWeight(ctx context.Context, groupID, subGroupID uint, weight int) error {
 	var group models.Group
 	if err := s.db.WithContext(ctx).First(&group, groupID).Error; err != nil {
@@ -292,7 +292,7 @@ func (s *AggregateGroupService) UpdateSubGroupWeight(ctx context.Context, groupI
 	return nil
 }
 
-// DeleteSubGroup removes a sub group from an aggregate group
+// DeleteSubGroup 从聚合分组中移除子分组
 func (s *AggregateGroupService) DeleteSubGroup(ctx context.Context, groupID, subGroupID uint) error {
 	var group models.Group
 	if err := s.db.WithContext(ctx).First(&group, groupID).Error; err != nil {
@@ -326,7 +326,7 @@ func (s *AggregateGroupService) DeleteSubGroup(ctx context.Context, groupID, sub
 	return nil
 }
 
-// CountAggregateGroupsUsingSubGroup returns the number of aggregate groups that use the specified group as a sub-group
+// CountAggregateGroupsUsingSubGroup 返回使用指定分组作为子分组的聚合分组数量
 func (s *AggregateGroupService) CountAggregateGroupsUsingSubGroup(ctx context.Context, subGroupID uint) (int64, error) {
 	var count int64
 	err := s.db.WithContext(ctx).
@@ -341,7 +341,7 @@ func (s *AggregateGroupService) CountAggregateGroupsUsingSubGroup(ctx context.Co
 	return count, nil
 }
 
-// GetParentAggregateGroups returns the aggregate groups that use the specified group as a sub-group
+// GetParentAggregateGroups 返回使用指定分组作为子分组的聚合分组
 func (s *AggregateGroupService) GetParentAggregateGroups(ctx context.Context, subGroupID uint) ([]models.ParentAggregateGroupInfo, error) {
 	var groupSubGroups []models.GroupSubGroup
 	if err := s.db.WithContext(ctx).Where("sub_group_id = ?", subGroupID).Find(&groupSubGroups).Error; err != nil {
@@ -378,7 +378,7 @@ func (s *AggregateGroupService) GetParentAggregateGroups(ctx context.Context, su
 	return parentGroups, nil
 }
 
-// keyStatsResult stores key statistics for a single group
+// keyStatsResult 保存单个分组的密钥统计
 type keyStatsResult struct {
 	GroupID     uint
 	TotalKeys   int64
@@ -387,7 +387,7 @@ type keyStatsResult struct {
 	Err         error
 }
 
-// fetchSubGroupsKeyStats batch fetches key statistics for multiple sub-groups concurrently
+// fetchSubGroupsKeyStats 并发批量获取多个子分组的密钥统计
 func (s *AggregateGroupService) fetchSubGroupsKeyStats(ctx context.Context, groupIDs []uint) map[uint]keyStatsResult {
 	results := make(map[uint]keyStatsResult)
 	var mu sync.Mutex
@@ -401,7 +401,7 @@ func (s *AggregateGroupService) fetchSubGroupsKeyStats(ctx context.Context, grou
 			var totalKeys, activeKeys int64
 			result := keyStatsResult{GroupID: gid}
 
-			// Query total keys
+			// 查询总密钥数
 			if err := s.db.WithContext(ctx).Model(&models.APIKey{}).
 				Where("group_id = ?", gid).
 				Count(&totalKeys).Error; err != nil {
@@ -412,7 +412,7 @@ func (s *AggregateGroupService) fetchSubGroupsKeyStats(ctx context.Context, grou
 				return
 			}
 
-			// Query active keys
+			// 查询活跃密钥数
 			if err := s.db.WithContext(ctx).Model(&models.APIKey{}).
 				Where("group_id = ? AND status = ?", gid, models.KeyStatusActive).
 				Count(&activeKeys).Error; err != nil {

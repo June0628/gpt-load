@@ -15,13 +15,12 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// GetSettings handles the GET /api/settings request.
-// It retrieves all system settings, groups them by category, and returns them.
+// GetSettings 处理 GET /api/settings 请求，获取所有系统设置并按类别分组返回。
 func (s *Server) GetSettings(c *gin.Context) {
 	currentSettings := s.SettingsManager.GetSettings()
 	settingsInfo := utils.GenerateSettingsMetadata(&currentSettings)
 
-	// Translate settings info
+	// 翻译设置信息
 	for i := range settingsInfo {
 		if strings.HasPrefix(settingsInfo[i].Name, "config.") {
 			settingsInfo[i].Name = i18n.Message(c, settingsInfo[i].Name)
@@ -34,7 +33,7 @@ func (s *Server) GetSettings(c *gin.Context) {
 		}
 	}
 
-	// Group settings by category while preserving order
+	// 按类别对设置进行分组并保持顺序
 	categorized := make(map[string][]models.SystemSettingInfo)
 	var categoryOrder []string
 	for _, s := range settingsInfo {
@@ -44,7 +43,7 @@ func (s *Server) GetSettings(c *gin.Context) {
 		categorized[s.Category] = append(categorized[s.Category], s)
 	}
 
-	// Create the response structure in the correct order
+	// 按正确顺序创建响应结构
 	var responseData []models.CategorizedSettings
 	for _, categoryName := range categoryOrder {
 		responseData = append(responseData, models.CategorizedSettings{
@@ -56,7 +55,7 @@ func (s *Server) GetSettings(c *gin.Context) {
 	response.Success(c, responseData)
 }
 
-// UpdateSettings handles the PUT /api/settings request.
+// UpdateSettings 处理 PUT /api/settings 请求。
 func (s *Server) UpdateSettings(c *gin.Context) {
 	var settingsMap map[string]any
 	if err := c.ShouldBindJSON(&settingsMap); err != nil {
@@ -69,7 +68,7 @@ func (s *Server) UpdateSettings(c *gin.Context) {
 		return
 	}
 
-	// Sanitize proxy_keys input
+	// 清理 proxy_keys 输入
 	if proxyKeys, ok := settingsMap["proxy_keys"]; ok {
 		if proxyKeysStr, ok := proxyKeys.(string); ok {
 			cleanedKeys := utils.SplitAndTrim(proxyKeysStr, ",")
@@ -93,8 +92,7 @@ type LogTableInfo struct {
 	RowCount  int64  `json:"row_count"`
 }
 
-// GetLogTables handles GET /api/settings/log-tables
-// 获取所有存在的日志表列表
+// GetLogTables 处理 GET /api/settings/log-tables，获取所有存在的日志表列表
 func (s *Server) GetLogTables(c *gin.Context) {
 	var allTables []string
 	dialect := db.DB.Dialector.Name()
@@ -157,8 +155,7 @@ type ManualUploadRequest struct {
 	TableName string `json:"table_name" binding:"required"`
 }
 
-// ManualUploadLogTable handles POST /api/settings/log-tables/upload
-// 手动上传指定日志表到外部存储
+// ManualUploadLogTable 处理 POST /api/settings/log-tables/upload，手动上传指定日志表到外部存储
 func (s *Server) ManualUploadLogTable(c *gin.Context) {
 	var req ManualUploadRequest
 	if err := c.ShouldBindJSON(&req); err != nil {

@@ -13,7 +13,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// NewCronChecker is responsible for periodically validating invalid keys.
+// CronChecker 负责定期验证无效密钥
 type CronChecker struct {
 	DB              *gorm.DB
 	SettingsManager *config.SystemSettingsManager
@@ -23,7 +23,7 @@ type CronChecker struct {
 	wg              sync.WaitGroup
 }
 
-// NewCronChecker creates a new CronChecker.
+// NewCronChecker 创建一个新的CronChecker
 func NewCronChecker(
 	db *gorm.DB,
 	settingsManager *config.SystemSettingsManager,
@@ -39,18 +39,18 @@ func NewCronChecker(
 	}
 }
 
-// Start begins the cron job execution.
+// Start 开始执行定时任务
 func (s *CronChecker) Start() {
 	logrus.Debug("Starting CronChecker...")
 	s.wg.Add(1)
 	go s.runLoop()
 }
 
-// Stop stops the cron job, respecting the context for shutdown timeout.
+// Stop 停止定时任务，尊重上下文的关闭超时
 func (s *CronChecker) Stop(ctx context.Context) {
 	close(s.stopChan)
 
-	// Wait for the goroutine to finish, or for the shutdown to time out.
+	// 等待goroutine完成，或等待关闭超时
 	done := make(chan struct{})
 	go func() {
 		s.wg.Wait()
@@ -86,8 +86,7 @@ func (s *CronChecker) runLoop() {
 	}
 }
 
-// forEachGroup loads non-aggregate groups and runs the given function concurrently for each group
-// that needs processing based on the configured interval.
+// forEachGroup 加载非聚合分组并并发执行给定函数，基于配置的间隔判断是否需要处理
 // useBalanceTimestamp: true 表示使用 LastBalanceQueriedAt 判断，false 表示使用 LastValidatedAt。
 func (s *CronChecker) forEachGroup(actionName string, useBalanceTimestamp bool, fn func(group *models.Group)) {
 	var groups []models.Group
@@ -130,8 +129,7 @@ func (s *CronChecker) forEachGroup(actionName string, useBalanceTimestamp bool, 
 	wg.Wait()
 }
 
-// decryptKeyForUse decrypts the key and returns a new struct with only the fields needed for processing.
-// 避免修改原始数据，消除隐式副作用。
+// decryptKeyForUse 解密密钥并返回仅包含处理所需字段的新结构体，避免修改原始数据，消除隐式副作用
 func (s *CronChecker) decryptKeyForUse(key *models.APIKey) (*models.APIKey, error) {
 	decryptedKey, err := s.EncryptionSvc.Decrypt(key.KeyValue)
 	if err != nil {
@@ -145,8 +143,8 @@ func (s *CronChecker) decryptKeyForUse(key *models.APIKey) (*models.APIKey, erro
 	}, nil
 }
 
-// updateGroupTimestamp updates a timestamp column for a group.
-// columnName: "last_validated_at" or "last_balance_queried_at"
+// updateGroupTimestamp 更新分组的时间戳列
+// columnName: "last_validated_at" 或 "last_balance_queried_at"
 func (s *CronChecker) updateGroupTimestamp(group *models.Group, columnName string) error {
 	if err := s.DB.Model(group).Update(columnName, time.Now()).Error; err != nil {
 		logrus.Errorf("CronChecker: failed to update %s for group %s: %v", columnName, group.Name, err)
@@ -155,9 +153,9 @@ func (s *CronChecker) updateGroupTimestamp(group *models.Group, columnName strin
 	return nil
 }
 
-// runWorkerPool processes a slice of keys using a worker pool pattern with support for graceful shutdown.
-// It decrypts each key, runs the processFn, and returns the count of successful results.
-// rateLimiter 可选，用于控制所有 worker 的总请求速率（如 balance 查询限流）。
+// runWorkerPool 使用工作池模式处理密钥切片，支持优雅关闭
+// 解密每个密钥，运行processFn，返回成功结果的数量
+// rateLimiter 可选，用于控制所有worker的总请求速率（如balance查询限流）
 func (s *CronChecker) runWorkerPool(
 	keys []models.APIKey,
 	concurrency int,
@@ -193,7 +191,7 @@ func (s *CronChecker) runWorkerPool(
 						}
 					}
 
-					// Decrypt the key before processing
+					// 处理前解密密钥
 					keyForUse, err := s.decryptKeyForUse(key)
 					if err != nil {
 						logrus.WithError(err).WithField("key_id", key.ID).Errorf("CronChecker[%s]: failed to decrypt key, skipping", actionName)
@@ -224,14 +222,14 @@ DistributeLoop:
 	return successCount
 }
 
-// submitValidationJobs finds groups whose keys need validation and validates them concurrently.
+// submitValidationJobs 查找需要验证密钥的分组并并发验证
 func (s *CronChecker) submitValidationJobs() {
 	s.forEachGroup("validation", false, func(group *models.Group) {
 		s.validateGroupKeys(group)
 	})
 }
 
-// validateGroupKeys validates all invalid keys for a single group concurrently.
+// validateGroupKeys 并发验证单个分组的所有无效密钥
 func (s *CronChecker) validateGroupKeys(group *models.Group) {
 	groupProcessStart := time.Now()
 
@@ -261,7 +259,7 @@ func (s *CronChecker) validateGroupKeys(group *models.Group) {
 			}
 			return isValid
 		},
-		nil, // validation 不需要限流
+		nil, // validation不需要限流
 	)
 
 	if err := s.updateGroupTimestamp(group, "last_validated_at"); err != nil {
@@ -278,8 +276,8 @@ func (s *CronChecker) validateGroupKeys(group *models.Group) {
 	)
 }
 
-// submitBalanceQueryJobs finds groups with balance query enabled and queries balances.
-// 复用 KeyValidationIntervalMinutes 配置作为余额查询间隔。
+// submitBalanceQueryJobs 查找启用余额查询的分组并查询余额
+// 复用KeyValidationIntervalMinutes配置作为余额查询间隔
 func (s *CronChecker) submitBalanceQueryJobs() {
 	s.forEachGroup("balance", true, func(group *models.Group) {
 		if group.ShouldQueryBalance() {
@@ -288,7 +286,7 @@ func (s *CronChecker) submitBalanceQueryJobs() {
 	})
 }
 
-// queryGroupBalances queries balances for all active keys in a group.
+// queryGroupBalances 查询分组内所有活跃密钥的余额
 func (s *CronChecker) queryGroupBalances(group *models.Group) {
 	groupProcessStart := time.Now()
 
@@ -307,7 +305,7 @@ func (s *CronChecker) queryGroupBalances(group *models.Group) {
 		return
 	}
 
-	// 限流：所有 worker 共享一个 ticker，控制整体请求速率
+	// 限流：所有worker共享一个ticker，控制整体请求速率
 	rateLimitDelay := 200 * time.Millisecond
 	rateLimiter := time.NewTicker(rateLimitDelay)
 	defer rateLimiter.Stop()

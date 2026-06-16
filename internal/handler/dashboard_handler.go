@@ -14,7 +14,7 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// Stats Get dashboard statistics
+// Stats 获取仪表盘统计数据
 func (s *Server) Stats(c *gin.Context) {
 	var activeKeys, invalidKeys int64
 	s.DB.Model(&models.APIKey{}).Where("status = ?", models.KeyStatusActive).Count(&activeKeys)
@@ -114,7 +114,7 @@ func (s *Server) Stats(c *gin.Context) {
 	response.Success(c, stats)
 }
 
-// Chart Get dashboard chart data
+// Chart 获取仪表盘图表数据
 func (s *Server) Chart(c *gin.Context) {
 	groupID := c.Query("groupId")
 
@@ -394,7 +394,7 @@ func hasGoodComplexity(password string) bool {
 	return count >= 3
 }
 
-// Encryption scenario types
+// 加密场景类型
 const (
 	ScenarioNone             = ""
 	ScenarioDataNotEncrypted = "data_not_encrypted"
@@ -402,7 +402,7 @@ const (
 	ScenarioKeyMismatch      = "key_mismatch"
 )
 
-// EncryptionStatus checks if ENCRYPTION_KEY is configured but keys are not encrypted
+// EncryptionStatus 检查是否配置了 ENCRYPTION_KEY 但密钥未加密
 func (s *Server) EncryptionStatus(c *gin.Context) {
 	hasMismatch, scenarioType, message, suggestion := s.checkEncryptionMismatch(c)
 
@@ -414,11 +414,11 @@ func (s *Server) EncryptionStatus(c *gin.Context) {
 	})
 }
 
-// checkEncryptionMismatch detects encryption configuration mismatches
+// checkEncryptionMismatch 检测加密配置不匹配情况
 func (s *Server) checkEncryptionMismatch(c *gin.Context) (bool, string, string, string) {
 	encryptionKey := s.config.GetEncryptionKey()
 
-	// Sample check API keys
+	// 抽样检查 API 密钥
 	var sampleKeys []models.APIKey
 	if err := s.DB.Limit(20).Where("key_hash IS NOT NULL AND key_hash != ''").Find(&sampleKeys).Error; err != nil {
 		logrus.WithError(err).Error("Failed to fetch sample keys for encryption check")
@@ -426,11 +426,11 @@ func (s *Server) checkEncryptionMismatch(c *gin.Context) (bool, string, string, 
 	}
 
 	if len(sampleKeys) == 0 {
-		// No keys in database, no mismatch
+		// 数据库中无密钥，无不匹配
 		return false, ScenarioNone, "", ""
 	}
 
-	// Check hash consistency with unencrypted data
+	// 检查未加密数据的哈希一致性
 	noopService, err := encryption.NewService("")
 	if err != nil {
 		logrus.WithError(err).Error("Failed to create noop encryption service")
@@ -439,7 +439,7 @@ func (s *Server) checkEncryptionMismatch(c *gin.Context) (bool, string, string, 
 
 	unencryptedHashMatchCount := 0
 	for _, key := range sampleKeys {
-		// For unencrypted data: key_hash should match SHA256(key_value)
+		// 对于未加密数据：key_hash 应匹配 SHA256(key_value)
 		expectedHash := noopService.Hash(key.KeyValue)
 		if expectedHash == key.KeyHash {
 			unencryptedHashMatchCount++
@@ -448,16 +448,16 @@ func (s *Server) checkEncryptionMismatch(c *gin.Context) (bool, string, string, 
 
 	unencryptedConsistencyRate := float64(unencryptedHashMatchCount) / float64(len(sampleKeys))
 
-	// If ENCRYPTION_KEY is configured, also check if current key can decrypt the data
+	// 如果配置了 ENCRYPTION_KEY，还需检查当前密钥是否能解密数据
 	var currentKeyHashMatchCount int
 	if encryptionKey != "" {
 		currentService, err := encryption.NewService(encryptionKey)
 		if err == nil {
 			for _, key := range sampleKeys {
-				// Try to decrypt and re-hash to check if current key matches
+				// 尝试解密并重新哈希以检查当前密钥是否匹配
 				decrypted, err := currentService.Decrypt(key.KeyValue)
 				if err == nil {
-					// Successfully decrypted, check if hash matches
+					// 解密成功，检查哈希是否匹配
 					expectedHash := currentService.Hash(decrypted)
 					if expectedHash == key.KeyHash {
 						currentKeyHashMatchCount++
@@ -468,7 +468,7 @@ func (s *Server) checkEncryptionMismatch(c *gin.Context) (bool, string, string, 
 	}
 	currentKeyConsistencyRate := float64(currentKeyHashMatchCount) / float64(len(sampleKeys))
 
-	// Scenario A: ENCRYPTION_KEY configured but data not encrypted
+	// 场景 A：已配置 ENCRYPTION_KEY 但数据未加密
 	if encryptionKey != "" && unencryptedConsistencyRate > 0.8 {
 		return true,
 			ScenarioDataNotEncrypted,
@@ -476,7 +476,7 @@ func (s *Server) checkEncryptionMismatch(c *gin.Context) (bool, string, string, 
 			i18n.Message(c, "dashboard.encryption_key_migration_required")
 	}
 
-	// Scenario B: ENCRYPTION_KEY not configured but data is encrypted
+	// 场景 B：未配置 ENCRYPTION_KEY 但数据已加密
 	if encryptionKey == "" && unencryptedConsistencyRate < 0.2 {
 		return true,
 			ScenarioKeyNotConfigured,
@@ -484,7 +484,7 @@ func (s *Server) checkEncryptionMismatch(c *gin.Context) (bool, string, string, 
 			i18n.Message(c, "dashboard.configure_same_encryption_key")
 	}
 
-	// Scenario C: ENCRYPTION_KEY configured but doesn't match encrypted data
+	// 场景 C：已配置 ENCRYPTION_KEY 但与加密数据不匹配
 	if encryptionKey != "" && unencryptedConsistencyRate < 0.2 && currentKeyConsistencyRate < 0.2 {
 		return true,
 			ScenarioKeyMismatch,

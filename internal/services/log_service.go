@@ -16,7 +16,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// ExportableLogKey defines the structure for the data to be exported to CSV.
+// ExportableLogKey 定义导出到 CSV 的数据结构
 type ExportableLogKey struct {
 	KeyValue   string `gorm:"column:key_value"`
 	GroupName  string `gorm:"column:group_name"`
@@ -142,13 +142,13 @@ func (s *LogService) BatchDecryptLogs(logs []*models.RequestLog) {
 	}
 }
 
-// LogService provides services related to request logs.
+// LogService 提供与请求日志相关的服务
 type LogService struct {
 	DB            *gorm.DB
 	EncryptionSvc encryption.Service
 }
 
-// NewLogService creates a new LogService.
+// NewLogService 创建新的 LogService
 func NewLogService(db *gorm.DB, encryptionSvc encryption.Service) *LogService {
 	return &LogService{
 		DB:            db,
@@ -156,7 +156,7 @@ func NewLogService(db *gorm.DB, encryptionSvc encryption.Service) *LogService {
 	}
 }
 
-// logFiltersScope returns a GORM scope function that applies filters from the Gin context.
+// logFiltersScope 返回一个应用 Gin 上下文过滤器的 GORM 作用域函数
 func (s *LogService) logFiltersScope(c *gin.Context) func(db *gorm.DB) *gorm.DB {
 	return func(db *gorm.DB) *gorm.DB {
 		if parentGroupName := c.Query("parent_group_name"); parentGroupName != "" {
@@ -302,13 +302,13 @@ func (s *LogService) GetLogsQuery(c *gin.Context) *gorm.DB {
 	return s.DB.Table("(?) as combined_logs", subQuery).Scopes(s.logFiltersScope(c))
 }
 
-// StreamLogKeysToCSV fetches unique keys from logs based on filters and streams them as a CSV.
+// StreamLogKeysToCSV 从日志中获取去重的密钥并以 CSV 格式流式输出
 func (s *LogService) StreamLogKeysToCSV(c *gin.Context, writer io.Writer) error {
-	// Create a CSV writer
+	// 创建 CSV 写入器
 	csvWriter := csv.NewWriter(writer)
 	defer csvWriter.Flush()
 
-	// Write CSV header
+	// 写入 CSV 表头
 	header := []string{"key_value", "group_name", "status_code"}
 	if err := csvWriter.Write(header); err != nil {
 		return fmt.Errorf("failed to write CSV header: %w", err)

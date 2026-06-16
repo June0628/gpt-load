@@ -27,7 +27,7 @@ type BalanceQueryResult struct {
 	BalanceInfo *BalanceInfo `json:"balance_info"`
 }
 
-// Key状态
+// Key 状态常量
 const (
 	KeyStatusActive  = "active"
 	KeyStatusInvalid = "invalid"
@@ -65,11 +65,11 @@ type GroupConfig struct {
 	EnableBalanceQuery *bool `json:"enable_balance_query,omitempty"` // 是否启用余额查询
 }
 
-// HeaderRule defines a single rule for header manipulation.
+// HeaderRule 定义头部操作的单条规则
 type HeaderRule struct {
 	Key    string `json:"key"`
 	Value  string `json:"value"`
-	Action string `json:"action"` // "set" or "remove"
+	Action string `json:"action"` // "set" 或 "remove"
 }
 
 // GroupSubGroup 聚合分组和子分组的关联表
@@ -81,11 +81,11 @@ type GroupSubGroup struct {
 	CreatedAt  time.Time `json:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at"`
 
-	// Lightweight association - only store necessary info for performance
+	// 轻量级关联 - 仅存储必要信息以提高性能
 	SubGroupName string `gorm:"-" json:"sub_group_name,omitempty"`
 }
 
-// SubGroupInfo 用于API响应的子分组信息
+// SubGroupInfo 用于 API 响应的子分组信息
 type SubGroupInfo struct {
 	Group       Group `json:"group"`
 	Weight      int   `json:"weight"`
@@ -94,7 +94,7 @@ type SubGroupInfo struct {
 	InvalidKeys int64 `json:"invalid_keys"`
 }
 
-// ParentAggregateGroupInfo 用于API响应的父聚合分组信息
+// ParentAggregateGroupInfo 用于 API 响应的父聚合分组信息
 type ParentAggregateGroupInfo struct {
 	GroupID     uint   `json:"group_id"`
 	Name        string `json:"name"`
@@ -111,7 +111,7 @@ type Group struct {
 	DisplayName         string               `gorm:"type:varchar(255)" json:"display_name"`
 	ProxyKeys           string               `gorm:"type:text" json:"proxy_keys"`
 	Description         string               `gorm:"type:varchar(512)" json:"description"`
-	GroupType           string               `gorm:"type:varchar(50);default:'standard'" json:"group_type"` // 'standard' or 'aggregate'
+	GroupType           string               `gorm:"type:varchar(50);default:'standard'" json:"group_type"` // 'standard' 或 'aggregate'
 	Upstreams           datatypes.JSON       `gorm:"type:json;not null" json:"upstreams"`
 	ValidationEndpoint  string               `gorm:"type:varchar(255)" json:"validation_endpoint"`
 	ChannelType         string               `gorm:"type:varchar(50);not null" json:"channel_type"`
@@ -134,7 +134,7 @@ type Group struct {
 	CreatedAt           time.Time            `gorm:"column:created_at" json:"created_at"`
 	UpdatedAt           time.Time            `gorm:"column:updated_at" json:"updated_at"`
 
-	// For cache
+	// 用于缓存
 	ProxyKeysMap              map[string]struct{}        `gorm:"-" json:"-"`
 	HeaderRuleList            []HeaderRule               `gorm:"-" json:"-"`
 	ModelRedirectMap          map[string]string          `gorm:"-" json:"-"`
@@ -166,7 +166,7 @@ type APIKey struct {
 	BalanceStatus string `gorm:"type:varchar(100);default:''" json:"balance_status"`
 }
 
-// RequestType 请求类型常量
+// 请求类型常量
 const (
 	RequestTypeRetry = "retry"
 	RequestTypeFinal = "final"
@@ -194,7 +194,7 @@ type RequestLog struct {
 	UpstreamAddr    string    `gorm:"type:varchar(500)" json:"upstream_addr"`
 	IsStream        bool      `gorm:"not null" json:"is_stream"`
 	RequestBody     string    `gorm:"type:mediumtext" json:"request_body"`
-	AgentFiles      string    `gorm:"type:longtext" json:"-"` // 不在JSON中展示，仅用于数据库存储
+	AgentFiles      string    `gorm:"type:longtext" json:"-"` // 不在 JSON 中展示，仅用于数据库存储
 }
 
 // StatCard 用于仪表盘的单个统计卡片数据
@@ -214,7 +214,7 @@ type SecurityWarning struct {
 	Suggestion string `json:"suggestion"` // 建议解决方案
 }
 
-// DashboardStatsResponse 用于仪表盘基础统计的API响应
+// DashboardStatsResponse 用于仪表盘基础统计的 API 响应
 type DashboardStatsResponse struct {
 	KeyCount         StatCard          `json:"key_count"`
 	RPM              StatCard          `json:"rpm"`
@@ -230,7 +230,7 @@ type ChartDataset struct {
 	Color string  `json:"color"`
 }
 
-// ChartData 用于图表的API响应
+// ChartData 用于图表的 API 响应
 type ChartData struct {
 	Labels   []string       `json:"labels"`
 	Datasets []ChartDataset `json:"datasets"`

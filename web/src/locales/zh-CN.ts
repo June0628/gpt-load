@@ -414,6 +414,8 @@ export default {
     aggregateBalanceDescription: "启用后会在分组卡片上显示汇总后的总余额",
     balanceLastUpdated: "最后更新时间",
     balanceQueryFailed: "查询失败",
+    queryBalance: "立即查询",
+    balanceQueryStarted: "余额查询已启动，请稍后刷新查看结果",
     // 密钥失效配置
     keyExpirationConfig: "密钥失效配置",
     keyExpirationConfigTooltip: "配置密钥的失效策略，控制密钥何时变得不可用",
@@ -630,6 +632,8 @@ export default {
     processing: "正在处理任务...",
     completed: "任务已完成。",
     hideProgress: "隐藏进度条",
+    clearTask: "清除卡住的任务",
+    taskCleared: "任务已清除",
     validatingKeys: "正在验证分组 [{groupName}] 的密钥",
     importingKeys: "正在向分组 [{groupName}] 导入密钥",
     deletingKeys: "正在删除分组 [{groupName}] 的密钥",

@@ -12,15 +12,15 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// Decompressor defines the interface for different decompression algorithms
+// Decompressor 定义不同解压缩算法的接口
 type Decompressor interface {
 	Decompress(data []byte) ([]byte, error)
 }
 
-// decompressorRegistry holds all registered decompressors
+// decompressorRegistry 存储所有已注册的解压缩器
 var decompressorRegistry = make(map[string]Decompressor)
 
-// init registers default decompressors
+// init 注册默认解压缩器
 func init() {
 	RegisterDecompressor("gzip", &GzipDecompressor{})
 	RegisterDecompressor("br", &BrotliDecompressor{})
@@ -28,27 +28,27 @@ func init() {
 	RegisterDecompressor("zstd", &ZstdDecompressor{})
 }
 
-// RegisterDecompressor allows registering new decompression algorithms
+// RegisterDecompressor 注册新的解压缩算法
 func RegisterDecompressor(encoding string, decompressor Decompressor) {
 	decompressorRegistry[encoding] = decompressor
 	logrus.Debugf("Registered decompressor for encoding: %s", encoding)
 }
 
-// DecompressResponse automatically decompresses response data based on Content-Encoding header
+// DecompressResponse 根据 Content-Encoding 头自动解压响应数据
 func DecompressResponse(contentEncoding string, data []byte) ([]byte, error) {
-	// If no encoding specified or empty data, return as-is
+	// 未指定编码或数据为空时直接返回
 	if contentEncoding == "" || len(data) == 0 {
 		return data, nil
 	}
 
-	// Look up the decompressor
+	// 查找解压缩器
 	decompressor, exists := decompressorRegistry[contentEncoding]
 	if !exists {
 		logrus.Warnf("No decompressor registered for encoding '%s', returning original data", contentEncoding)
 		return data, nil
 	}
 
-	// Decompress
+	// 执行解压
 	decompressed, err := decompressor.Decompress(data)
 	if err != nil {
 		logrus.WithError(err).Warnf("Failed to decompress with '%s', returning original data", contentEncoding)
@@ -60,10 +60,10 @@ func DecompressResponse(contentEncoding string, data []byte) ([]byte, error) {
 	return decompressed, nil
 }
 
-// GzipDecompressor handles gzip compression
+// GzipDecompressor 处理 gzip 解压缩
 type GzipDecompressor struct{}
 
-// Decompress implements Decompressor interface for gzip
+// Decompress 实现 gzip 解压缩接口
 func (g *GzipDecompressor) Decompress(data []byte) ([]byte, error) {
 	reader, err := gzip.NewReader(bytes.NewReader(data))
 	if err != nil {
@@ -79,10 +79,10 @@ func (g *GzipDecompressor) Decompress(data []byte) ([]byte, error) {
 	return decompressed, nil
 }
 
-// BrotliDecompressor handles brotli compression
+// BrotliDecompressor 处理 brotli 解压缩
 type BrotliDecompressor struct{}
 
-// Decompress implements Decompressor interface for brotli
+// Decompress 实现 brotli 解压缩接口
 func (b *BrotliDecompressor) Decompress(data []byte) ([]byte, error) {
 	reader := brotli.NewReader(bytes.NewReader(data))
 
@@ -94,10 +94,10 @@ func (b *BrotliDecompressor) Decompress(data []byte) ([]byte, error) {
 	return decompressed, nil
 }
 
-// DeflateDecompressor handles deflate compression (raw DEFLATE without header)
+// DeflateDecompressor 处理解压缩（无头的原始 DEFLATE）
 type DeflateDecompressor struct{}
 
-// Decompress implements Decompressor interface for deflate
+// Decompress 实现 deflate 解压缩接口
 func (d *DeflateDecompressor) Decompress(data []byte) ([]byte, error) {
 	reader := flate.NewReader(bytes.NewReader(data))
 	defer reader.Close()
@@ -110,10 +110,10 @@ func (d *DeflateDecompressor) Decompress(data []byte) ([]byte, error) {
 	return decompressed, nil
 }
 
-// ZstdDecompressor handles Zstandard compression
+// ZstdDecompressor 处理 Zstandard 解压缩
 type ZstdDecompressor struct{}
 
-// Decompress implements Decompressor interface for zstd
+// Decompress 实现 zstd 解压缩接口
 func (z *ZstdDecompressor) Decompress(data []byte) ([]byte, error) {
 	reader, err := zstd.NewReader(bytes.NewReader(data))
 	if err != nil {

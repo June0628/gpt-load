@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"gpt-load/internal/encryption"
@@ -22,28 +23,28 @@ const (
 // keyDelimiterRegex 预编译，避免每次调用 ParseKeysFromText 重新编译
 var keyDelimiterRegex = regexp.MustCompile(`[\s,;\n\r\t]+`)
 
-// AddKeysResult holds the result of adding multiple keys.
+// AddKeysResult 保存批量添加密钥的结果
 type AddKeysResult struct {
 	AddedCount   int   `json:"added_count"`
 	IgnoredCount int   `json:"ignored_count"`
 	TotalInGroup int64 `json:"total_in_group"`
 }
 
-// DeleteKeysResult holds the result of deleting multiple keys.
+// DeleteKeysResult 保存批量删除密钥的结果
 type DeleteKeysResult struct {
 	DeletedCount int   `json:"deleted_count"`
 	IgnoredCount int   `json:"ignored_count"`
 	TotalInGroup int64 `json:"total_in_group"`
 }
 
-// RestoreKeysResult holds the result of restoring multiple keys.
+// RestoreKeysResult 保存批量恢复密钥的结果
 type RestoreKeysResult struct {
 	RestoredCount int   `json:"restored_count"`
 	IgnoredCount  int   `json:"ignored_count"`
 	TotalInGroup  int64 `json:"total_in_group"`
 }
 
-// KeyService provides services related to API keys.
+// KeyService 提供与 API 密钥相关的服务
 type KeyService struct {
 	DB            *gorm.DB
 	KeyProvider   *keypool.KeyProvider
@@ -51,7 +52,7 @@ type KeyService struct {
 	EncryptionSvc encryption.Service
 }
 
-// NewKeyService creates a new KeyService.
+// NewKeyService 创建新的 KeyService
 func NewKeyService(db *gorm.DB, keyProvider *keypool.KeyProvider, keyValidator *keypool.KeyValidator, encryptionSvc encryption.Service) *KeyService {
 	return &KeyService{
 		DB:            db,
@@ -94,7 +95,7 @@ func (s *KeyService) processAndCreateKeys(
 	keys []string,
 	progressCallback func(processed int),
 ) (addedCount int, ignoredCount int, err error) {
-	// 1. Get existing key hashes in the group for deduplication
+	// 1. 获取分组中已有的密钥哈希用于去重
 	var existingHashes []string
 	if err := s.DB.Model(&models.APIKey{}).Where("group_id = ?", groupID).Pluck("key_hash", &existingHashes).Error; err != nil {
 		return 0, 0, err
@@ -104,7 +105,7 @@ func (s *KeyService) processAndCreateKeys(
 		existingHashMap[h] = true
 	}
 
-	// 2. Prepare new keys for creation
+	// 2. 准备待创建的新密钥
 	var newKeysToCreate []models.APIKey
 	uniqueNewKeys := make(map[string]bool)
 
@@ -114,7 +115,7 @@ func (s *KeyService) processAndCreateKeys(
 			continue
 		}
 
-		// Generate hash for deduplication check
+		// 生成哈希用于去重检查
 		keyHash := s.EncryptionSvc.Hash(trimmedKey)
 		if existingHashMap[keyHash] {
 			continue
@@ -139,7 +140,7 @@ func (s *KeyService) processAndCreateKeys(
 		return 0, len(keys), nil
 	}
 
-	// 3. Use KeyProvider to add keys in chunks
+	// 3. 使用 KeyProvider 分块添加密钥
 	for i := 0; i < len(newKeysToCreate); i += chunkSize {
 		end := i + chunkSize
 		if end > len(newKeysToCreate) {
@@ -163,7 +164,7 @@ func (s *KeyService) processAndCreateKeys(
 func (s *KeyService) ParseKeysFromText(text string) []string {
 	var keys []string
 
-	// First, try to parse as a JSON array of strings
+	// 首先尝试解析为 JSON 字符串数组
 	if json.Unmarshal([]byte(text), &keys) == nil && len(keys) > 0 {
 		return s.filterValidKeys(keys)
 	}
@@ -181,7 +182,7 @@ func (s *KeyService) ParseKeysFromText(text string) []string {
 	return s.filterValidKeys(keys)
 }
 
-// filterValidKeys validates and filters potential API keys
+// filterValidKeys 验证并过滤潜在的 API 密钥
 func (s *KeyService) filterValidKeys(keys []string) []string {
 	var validKeys []string
 	for _, key := range keys {
@@ -193,9 +194,17 @@ func (s *KeyService) filterValidKeys(keys []string) []string {
 	return validKeys
 }
 
-// isValidKeyFormat performs basic validation on key format
+// isValidKeyFormat 对密钥格式进行基本验证
 func (s *KeyService) isValidKeyFormat(key string) bool {
-	return strings.TrimSpace(key) != ""
+	trimmed := strings.TrimSpace(key)
+	if trimmed == "" {
+		return false
+	}
+	// 过滤明显的 URL，防止用户误输入链接导致任务卡死
+	if strings.HasPrefix(trimmed, "http://") || strings.HasPrefix(trimmed, "https://") {
+		return false
+	}
+	return true
 }
 
 // RestoreMultipleKeys 批量恢复 key
@@ -236,17 +245,17 @@ func (s *KeyService) RestoreMultipleKeys(groupID uint, keysText string) (*Restor
 	}, nil
 }
 
-// RestoreAllInvalidKeys sets the status of all 'inactive' keys in a group to 'active'.
+// RestoreAllInvalidKeys 将分组中所有非活跃密钥的状态恢复为活跃
 func (s *KeyService) RestoreAllInvalidKeys(groupID uint) (int64, error) {
 	return s.KeyProvider.RestoreKeys(groupID)
 }
 
-// ClearAllInvalidKeys deletes all 'inactive' keys from a group.
+// ClearAllInvalidKeys 删除分组中所有非活跃密钥
 func (s *KeyService) ClearAllInvalidKeys(groupID uint) (int64, error) {
 	return s.KeyProvider.RemoveInvalidKeys(groupID)
 }
 
-// ClearAllKeys deletes all keys from a group.
+// ClearAllKeys 删除分组中的所有密钥
 func (s *KeyService) ClearAllKeys(groupID uint) (int64, error) {
 	return s.KeyProvider.RemoveAllKeys(groupID)
 }
@@ -366,4 +375,54 @@ func (s *KeyService) StreamKeysToWriter(groupID uint, statusFilter string, write
 	}).Error
 
 	return err
+}
+
+// QueryGroupBalances 查询分组内所有活跃密钥的余额
+func (s *KeyService) QueryGroupBalances(group *models.Group) {
+	var activeKeys []models.APIKey
+	if err := s.DB.Where("group_id = ? AND status = ?", group.ID, models.KeyStatusActive).Find(&activeKeys).Error; err != nil {
+		logrus.Errorf("查询分组 %s 活跃密钥失败: %v", group.Name, err)
+		return
+	}
+
+	if len(activeKeys) == 0 {
+		logrus.Debugf("分组 %s 没有活跃密钥，跳过余额查询", group.Name)
+		return
+	}
+
+	logrus.Infof("开始手动查询分组 %s 的余额，共 %d 个活跃密钥", group.Name, len(activeKeys))
+
+	// 使用密钥验证器的余额查询服务
+	validator := s.KeyValidator
+	if validator == nil {
+		logrus.Error("密钥验证器未初始化")
+		return
+	}
+
+	balanceService := validator.GetBalanceService()
+	if balanceService == nil {
+		logrus.Error("余额查询服务未初始化")
+		return
+	}
+
+	successCount := 0
+	for i := range activeKeys {
+		key := &activeKeys[i]
+		balanceInfo, err := balanceService.QueryBalance(context.Background(), group, key)
+		if err != nil {
+			logrus.WithError(err).WithField("key_id", key.ID).Debug("余额查询失败")
+			continue
+		}
+
+		if balanceInfo != nil && balanceInfo.Success {
+			s.KeyProvider.UpdateBalance(key, group, balanceInfo)
+			successCount++
+			logrus.WithFields(logrus.Fields{
+				"key_id":  key.ID,
+				"balance": balanceInfo.BalanceTotal,
+			}).Debug("余额查询成功")
+		}
+	}
+
+	logrus.Infof("分组 %s 余额查询完成，成功: %d/%d", group.Name, successCount, len(activeKeys))
 }

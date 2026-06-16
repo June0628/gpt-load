@@ -210,5 +210,16 @@ charts/*.tgz
 run-local.sh
 start-local.sh
 dev-setup.sh
+dev-run.sh
+test-migration.sh
+.air.local.toml
+.env.local*
+!env.local.example
 data/
 .arts/
+
+# Go 编译产物
+gpt-load
+
+# 前端编译产物
+web/dist/

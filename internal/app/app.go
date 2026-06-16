@@ -1,4 +1,4 @@
-// Package app provides the main application logic and lifecycle management.
+// Package app 提供主应用逻辑和生命周期管理。
 package app
 
 import (
@@ -25,7 +25,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// App holds all services and manages the application lifecycle.
+// App 持有所有服务并管理应用生命周期。
 type App struct {
 	engine            *gin.Engine
 	configManager     types.ConfigManager
@@ -42,7 +42,7 @@ type App struct {
 	httpServer        *http.Server
 }
 
-// AppParams defines the dependencies for the App.
+// AppParams 定义 App 的依赖项。
 type AppParams struct {
 	dig.In
 	Engine            *gin.Engine
@@ -59,7 +59,7 @@ type AppParams struct {
 	DB                *gorm.DB
 }
 
-// NewApp is the constructor for App, with dependencies injected by dig.
+// NewApp 是 App 的构造函数，通过 dig 注入依赖。
 func NewApp(params AppParams) *App {
 	return &App{
 		engine:            params.Engine,
@@ -77,7 +77,7 @@ func NewApp(params AppParams) *App {
 	}
 }
 
-// Start runs the application, it is a non-blocking call.
+// Start 运行应用，这是一个非阻塞调用。
 func (a *App) Start() error {
 	// 初始化 i18n
 	if err := i18n.Init(); err != nil {
@@ -140,7 +140,7 @@ func (a *App) Start() error {
 
 	a.groupManager.Initialize()
 
-	// Create HTTP server
+	// 创建 HTTP 服务器
 	serverConfig := a.configManager.GetEffectiveServerConfig()
 	a.httpServer = &http.Server{
 		Addr:           fmt.Sprintf("%s:%d", serverConfig.Host, serverConfig.Port),
@@ -151,7 +151,7 @@ func (a *App) Start() error {
 		MaxHeaderBytes: 1 << 20,
 	}
 
-	// Start HTTP server in a new goroutine
+	// 在新 goroutine 中启动 HTTP 服务器
 	go func() {
 		logrus.Infof("GPT-Load proxy server started successfully on Version: %s", version.Version)
 		logrus.Infof("Server address: http://%s:%d", serverConfig.Host, serverConfig.Port)
@@ -164,7 +164,7 @@ func (a *App) Start() error {
 	return nil
 }
 
-// Stop gracefully shuts down the application.
+// Stop 优雅关闭应用。
 func (a *App) Stop(ctx context.Context) {
 	logrus.Info("Shutting down server...")
 

@@ -1,4 +1,4 @@
-// Package handler provides HTTP handlers for the application
+// Package handler 提供应用程序的 HTTP 处理器
 package handler
 
 import (
@@ -43,7 +43,7 @@ func (s *Server) handleGroupError(c *gin.Context, err error) bool {
 	return true
 }
 
-// GroupCreateRequest defines the payload for creating a group.
+// GroupCreateRequest 定义创建分组的请求参数。
 type GroupCreateRequest struct {
 	Name                string                     `json:"name"`
 	DisplayName         string                     `json:"display_name"`
@@ -65,7 +65,7 @@ type GroupCreateRequest struct {
 	DailyRequestLimit   int                        `json:"daily_request_limit"`
 }
 
-// CreateGroup handles the creation of a new group.
+// CreateGroup 处理创建新分组。
 func (s *Server) CreateGroup(c *gin.Context) {
 	var req GroupCreateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -108,7 +108,7 @@ func (s *Server) CreateGroup(c *gin.Context) {
 	response.Success(c, s.newGroupResponse(c, group))
 }
 
-// ListGroups handles listing all groups.
+// ListGroups 处理获取所有分组列表。
 func (s *Server) ListGroups(c *gin.Context) {
 	groups, err := s.GroupService.ListGroups(c.Request.Context())
 	if s.handleGroupError(c, err) {
@@ -123,14 +123,13 @@ func (s *Server) ListGroups(c *gin.Context) {
 	response.Success(c, groupResponses)
 }
 
-// BalanceQueryConfigRequest defines the balance query configuration for a group.
+// BalanceQueryConfigRequest 定义分组的余额查询配置。
 type BalanceQueryConfigRequest struct {
 	Enabled          bool `json:"enabled"`
 	AggregateBalance bool `json:"aggregate_balance"`
 }
 
-// GroupUpdateRequest defines the payload for updating a group.
-// Using a dedicated struct avoids issues with zero values being ignored by GORM's Update.
+// GroupUpdateRequest 定义更新分组的请求参数，使用独立结构体避免零值被 GORM Update 忽略。
 type GroupUpdateRequest struct {
 	Name                *string                `json:"name,omitempty"`
 	DisplayName         *string                `json:"display_name,omitempty"`
@@ -183,7 +182,7 @@ func validateGroupReorderItems(items []GroupReorderItemRequest) error {
 	return nil
 }
 
-// UpdateGroup handles updating an existing group.
+// UpdateGroup 处理更新已有分组。
 func (s *Server) UpdateGroup(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
@@ -246,7 +245,7 @@ func (s *Server) UpdateGroup(c *gin.Context) {
 	response.Success(c, s.newGroupResponse(c, group))
 }
 
-// ReorderGroups handles batch reorder updates for groups.
+// ReorderGroups 处理分组的批量排序更新。
 func (s *Server) ReorderGroups(c *gin.Context) {
 	var req GroupReorderRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -273,13 +272,13 @@ func (s *Server) ReorderGroups(c *gin.Context) {
 	response.SuccessI18n(c, "success.groups_reordered", nil)
 }
 
-// BalanceQueryConfigResponse defines the balance query configuration for API response.
+// BalanceQueryConfigResponse 定义 API 响应中的余额查询配置。
 type BalanceQueryConfigResponse struct {
 	Enabled          bool `json:"enabled"`
 	AggregateBalance bool `json:"aggregate_balance"`
 }
 
-// GroupBalanceInfoResponse defines the balance info structure for API response.
+// GroupBalanceInfoResponse 定义 API 响应中的分组余额信息结构。
 type GroupBalanceInfoResponse struct {
 	TotalKeys     int64  `json:"total_keys"`
 	SuccessCount  int64  `json:"success_count"`
@@ -290,7 +289,7 @@ type GroupBalanceInfoResponse struct {
 	LastUpdatedAt string `json:"last_updated_at,omitempty"`
 }
 
-// GroupResponse defines the structure for a group response, excluding sensitive or large fields.
+// GroupResponse 定义分组响应的结构，排除敏感或大型字段。
 type GroupResponse struct {
 	ID                  uint                        `json:"id"`
 	Name                string                      `json:"name"`
@@ -318,7 +317,7 @@ type GroupResponse struct {
 	UpdatedAt           time.Time                   `json:"updated_at"`
 }
 
-// aggregateGroupBalance aggregates balance info from API keys for a group
+// aggregateGroupBalance 聚合分组下所有 API 密钥的余额信息
 func (s *Server) aggregateGroupBalance(ctx *gin.Context, group *models.Group) *GroupBalanceInfoResponse {
 	if group.GroupType == "aggregate" {
 		return nil
@@ -361,17 +360,16 @@ func (s *Server) aggregateGroupBalance(ctx *gin.Context, group *models.Group) *G
 		return nil
 	}
 
-	// Find the most recent updated key and its currency
+	// 查找最近更新的密钥及其币种
 	for _, key := range apiKeys {
-		// Only consider keys with non-zero UpdatedAt (has been queried before)
+		// 只考虑 UpdatedAt 非零（已查询过）的密钥
 		if !key.UpdatedAt.IsZero() {
 			if lastUpdatedAt == "" || key.UpdatedAt.Format(time.RFC3339) > lastUpdatedAt {
 				lastUpdatedAt = key.UpdatedAt.Format(time.RFC3339)
 			}
-			// Get currency from successfully queried keys
+			// 从成功查询的密钥中获取币种
 			if currency == "" && key.BalanceTotal != "" && key.BalanceTotal != "N/A" {
-				// Try to infer currency based on balance format or known patterns
-				// For now, we'll set a default that can be enhanced later
+				// 尝试根据余额格式或已知模式推断币种，目前设置默认值
 				currency = s.inferCurrencyFromKey(key)
 			}
 		}
@@ -388,7 +386,7 @@ func (s *Server) aggregateGroupBalance(ctx *gin.Context, group *models.Group) *G
 	}
 }
 
-// newGroupResponse creates a new GroupResponse from a models.Group.
+// newGroupResponse 从 models.Group 创建新的 GroupResponse。
 func (s *Server) newGroupResponse(ctx *gin.Context, group *models.Group) *GroupResponse {
 	appURL := s.SettingsManager.GetAppUrl()
 	endpoint := ""
@@ -400,7 +398,7 @@ func (s *Server) newGroupResponse(ctx *gin.Context, group *models.Group) *GroupR
 		}
 	}
 
-	// Parse header rules from JSON
+	// 从 JSON 解析 header 规则
 	var headerRules []models.HeaderRule
 	if len(group.HeaderRules) > 0 {
 		if err := json.Unmarshal(group.HeaderRules, &headerRules); err != nil {
@@ -409,7 +407,7 @@ func (s *Server) newGroupResponse(ctx *gin.Context, group *models.Group) *GroupR
 		}
 	}
 
-	// Aggregate balance info if balance query is enabled
+	// 如果启用了余额查询则聚合余额信息
 	var balanceInfo *GroupBalanceInfoResponse
 	if group.EnableBalanceQuery {
 		balanceInfo = s.aggregateGroupBalance(ctx, group)
@@ -446,7 +444,7 @@ func (s *Server) newGroupResponse(ctx *gin.Context, group *models.Group) *GroupR
 	}
 }
 
-// DeleteGroup handles deleting a group.
+// DeleteGroup 处理删除分组。
 func (s *Server) DeleteGroup(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
@@ -460,7 +458,7 @@ func (s *Server) DeleteGroup(c *gin.Context) {
 	response.SuccessI18n(c, "success.group_deleted", nil)
 }
 
-// ConfigOption represents a single configurable option for a group.
+// ConfigOption 表示分组的单个可配置选项。
 type ConfigOption struct {
 	Key          string `json:"key"`
 	Name         string `json:"name"`
@@ -468,7 +466,7 @@ type ConfigOption struct {
 	DefaultValue any    `json:"default_value"`
 }
 
-// GetGroupConfigOptions returns a list of available configuration options for groups.
+// GetGroupConfigOptions 返回分组可用的配置选项列表。
 func (s *Server) GetGroupConfigOptions(c *gin.Context) {
 	options, err := s.GroupService.GetGroupConfigOptions()
 	if s.handleGroupError(c, err) {
@@ -497,10 +495,9 @@ func (s *Server) GetGroupConfigOptions(c *gin.Context) {
 	response.Success(c, translated)
 }
 
-// inferCurrencyFromKey attempts to infer the currency based on key or group information
+// inferCurrencyFromKey 尝试根据密钥或分组信息推断币种
 func (s *Server) inferCurrencyFromKey(key models.APIKey) string {
-	// Default currency is USD, can be enhanced based on platform detection
-	// The actual currency should come from the balance query response
+	// 默认币种为 USD，可根据平台检测增强，实际币种应来自余额查询响应
 	return "USD"
 }
 
@@ -519,17 +516,17 @@ func (s *Server) GetGroupStats(c *gin.Context) {
 	response.Success(c, stats)
 }
 
-// GroupCopyRequest defines the payload for copying a group.
+// GroupCopyRequest 定义复制分组的请求参数。
 type GroupCopyRequest struct {
 	CopyKeys string `json:"copy_keys"` // "none"|"valid_only"|"all"
 }
 
-// GroupCopyResponse defines the response for group copy operation.
+// GroupCopyResponse 定义分组复制操作的响应。
 type GroupCopyResponse struct {
 	Group *GroupResponse `json:"group"`
 }
 
-// CopyGroup handles copying a group with optional content.
+// CopyGroup 处理复制分组及可选内容。
 
 func (s *Server) CopyGroup(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
@@ -557,7 +554,7 @@ func (s *Server) CopyGroup(c *gin.Context) {
 	response.Success(c, copyResponse)
 }
 
-// List godoc
+// List 获取分组列表
 func (s *Server) List(c *gin.Context) {
 	var groups []models.Group
 	if err := s.DB.Select("id, name,display_name").Find(&groups).Error; err != nil {
@@ -567,17 +564,17 @@ func (s *Server) List(c *gin.Context) {
 	response.Success(c, groups)
 }
 
-// AddSubGroupsRequest defines the payload for adding sub groups to an aggregate group
+// AddSubGroupsRequest 定义向聚合分组添加子分组的请求参数
 type AddSubGroupsRequest struct {
 	SubGroups []services.SubGroupInput `json:"sub_groups"`
 }
 
-// UpdateSubGroupWeightRequest defines the payload for updating a sub group weight
+// UpdateSubGroupWeightRequest 定义更新子分组权重的请求参数
 type UpdateSubGroupWeightRequest struct {
 	Weight int `json:"weight"`
 }
 
-// GetSubGroups handles getting sub groups of an aggregate group
+// GetSubGroups 处理获取聚合分组的子分组
 func (s *Server) GetSubGroups(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
@@ -593,7 +590,7 @@ func (s *Server) GetSubGroups(c *gin.Context) {
 	response.Success(c, subGroups)
 }
 
-// AddSubGroups handles adding sub groups to an aggregate group
+// AddSubGroups 处理向聚合分组添加子分组
 func (s *Server) AddSubGroups(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
@@ -614,7 +611,7 @@ func (s *Server) AddSubGroups(c *gin.Context) {
 	response.SuccessI18n(c, "success.sub_groups_added", nil)
 }
 
-// UpdateSubGroupWeight handles updating the weight of a sub group
+// UpdateSubGroupWeight 处理更新子分组的权重
 func (s *Server) UpdateSubGroupWeight(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
@@ -641,7 +638,7 @@ func (s *Server) UpdateSubGroupWeight(c *gin.Context) {
 	response.SuccessI18n(c, "success.sub_group_weight_updated", nil)
 }
 
-// DeleteSubGroup handles deleting a sub group from an aggregate group
+// DeleteSubGroup 处理从聚合分组中删除子分组
 func (s *Server) DeleteSubGroup(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
@@ -662,7 +659,7 @@ func (s *Server) DeleteSubGroup(c *gin.Context) {
 	response.SuccessI18n(c, "success.sub_group_deleted", nil)
 }
 
-// GetParentAggregateGroups handles getting parent aggregate groups that reference a group
+// GetParentAggregateGroups 处理获取引用指定分组的父聚合分组
 func (s *Server) GetParentAggregateGroups(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {

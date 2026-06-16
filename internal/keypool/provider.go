@@ -42,7 +42,7 @@ func NewProvider(db *gorm.DB, store store.Store, settingsManager *config.SystemS
 func (p *KeyProvider) SelectKey(groupID uint) (*models.APIKey, error) {
 	activeKeysListKey := fmt.Sprintf("group:%d:active_keys", groupID)
 
-	// 1. Atomically rotate the key ID from the list
+	// 1. 原子性地从列表中轮换密钥ID
 	keyIDStr, err := p.store.Rotate(activeKeysListKey)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
@@ -56,22 +56,22 @@ func (p *KeyProvider) SelectKey(groupID uint) (*models.APIKey, error) {
 		return nil, fmt.Errorf("failed to parse key ID '%s': %w", keyIDStr, err)
 	}
 
-	// 2. Get key details from HASH
+	// 2. 从HASH中获取密钥详情
 	keyHashKey := fmt.Sprintf("key:%d", keyID)
 	keyDetails, err := p.store.HGetAll(keyHashKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get key details for key ID %d: %w", keyID, err)
 	}
 
-	// 3. Manually unmarshal the map into an APIKey struct
+	// 3. 手动将map反序列化为APIKey结构体
 	failureCount, _ := strconv.ParseInt(keyDetails["failure_count"], 10, 64)
 	createdAt, _ := strconv.ParseInt(keyDetails["created_at"], 10, 64)
 
-	// Decrypt the key value for use by channels
+	// 解密密钥值供channel使用
 	encryptedKeyValue := keyDetails["key_string"]
 	decryptedKeyValue, err := p.encryptionSvc.Decrypt(encryptedKeyValue)
 	if err != nil {
-		// If decryption fails, try to use the value as-is (backward compatibility for unencrypted keys)
+		// 如果解密失败，尝试直接使用原始值（兼容未加密的密钥）
 		logrus.WithFields(logrus.Fields{
 			"keyID": keyID,
 			"error": err,
@@ -118,7 +118,7 @@ func (p *KeyProvider) UpdateStatus(apiKey *models.APIKey, group *models.Group, i
 	}()
 }
 
-// executeTransactionWithRetry wraps a database transaction with a retry mechanism.
+// executeTransactionWithRetry 用重试机制包装数据库事务
 func (p *KeyProvider) executeTransactionWithRetry(operation func(tx *gorm.DB) error) error {
 	const maxRetries = 3
 	const baseDelay = 50 * time.Millisecond
@@ -567,8 +567,7 @@ func (p *KeyProvider) RemoveAllKeys(groupID uint) (int64, error) {
 	return p.removeKeysByStatus(groupID)
 }
 
-// removeKeysByStatus is a generic function to remove keys by status.
-// If no status is provided, it removes all keys in the group.
+// removeKeysByStatus 按状态移除密钥的通用函数。如果未提供状态，则移除分组内所有密钥
 func (p *KeyProvider) removeKeysByStatus(groupID uint, status ...string) (int64, error) {
 	var keysToRemove []models.APIKey
 	var removedCount int64
@@ -651,16 +650,16 @@ func (p *KeyProvider) RemoveKeysFromStore(groupID uint, keyIDs []uint) error {
 	return nil
 }
 
-// addKeyToStore is a helper to add a single key to the cache.
+// addKeyToStore 将单个密钥添加到缓存的辅助函数
 func (p *KeyProvider) addKeyToStore(key *models.APIKey) error {
-	// 1. Store key details in HASH
+	// 1. 将密钥详情存储到HASH
 	keyHashKey := fmt.Sprintf("key:%d", key.ID)
 	keyDetails := p.apiKeyToMap(key)
 	if err := p.store.HSet(keyHashKey, keyDetails); err != nil {
 		return fmt.Errorf("failed to HSet key details for key %d: %w", key.ID, err)
 	}
 
-	// 2. If active, add to the active LIST
+	// 2. 如果是活跃状态，添加到活跃列表
 	if key.Status == models.KeyStatusActive {
 		activeKeysListKey := fmt.Sprintf("group:%d:active_keys", key.GroupID)
 		if err := p.store.LRem(activeKeysListKey, 0, key.ID); err != nil {
@@ -679,9 +678,9 @@ func (p *KeyProvider) addKeysToCacheBatch(groupID uint, keys []models.APIKey) er
 		return nil
 	}
 
-	// 1. 批量 HSet 密钥详情
+	// 1. 批量HSet密钥详情
 	if pipeliner, ok := p.store.(store.RedisPipeliner); ok {
-		// Redis: 使用 Pipeline 批量操作
+		// Redis: 使用Pipeline批量操作
 		pipe := pipeliner.Pipeline()
 		for i := range keys {
 			keyHashKey := fmt.Sprintf("key:%d", keys[i].ID)
@@ -691,7 +690,7 @@ func (p *KeyProvider) addKeysToCacheBatch(groupID uint, keys []models.APIKey) er
 			return fmt.Errorf("failed to batch HSet keys: %w", err)
 		}
 	} else {
-		// MemoryStore: 降级为逐个 HSet
+		// MemoryStore: 降级为逐个HSet
 		for i := range keys {
 			keyHashKey := fmt.Sprintf("key:%d", keys[i].ID)
 			if err := p.store.HSet(keyHashKey, p.apiKeyToMap(&keys[i])); err != nil {
@@ -700,14 +699,14 @@ func (p *KeyProvider) addKeysToCacheBatch(groupID uint, keys []models.APIKey) er
 		}
 	}
 
-	// 2. 收集所有密钥 ID
+	// 2. 收集所有密钥ID
 	activeKeysListKey := fmt.Sprintf("group:%d:active_keys", groupID)
 	activeKeyIDs := make([]any, len(keys))
 	for i := range keys {
 		activeKeyIDs[i] = keys[i].ID
 	}
 
-	// 3. 批量 LPush 活跃密钥
+	// 3. 批量LPush活跃密钥
 	if err := p.store.LPush(activeKeysListKey, activeKeyIDs...); err != nil {
 		return fmt.Errorf("failed to batch LPush keys to group %d: %w", groupID, err)
 	}
@@ -715,7 +714,7 @@ func (p *KeyProvider) addKeysToCacheBatch(groupID uint, keys []models.APIKey) er
 	return nil
 }
 
-// removeKeyFromStore is a helper to remove a single key from the cache.
+// removeKeyFromStore 从缓存中移除单个密钥的辅助函数
 func (p *KeyProvider) removeKeyFromStore(keyID, groupID uint) error {
 	activeKeysListKey := fmt.Sprintf("group:%d:active_keys", groupID)
 	if err := p.store.LRem(activeKeysListKey, 0, keyID); err != nil {
@@ -729,7 +728,7 @@ func (p *KeyProvider) removeKeyFromStore(keyID, groupID uint) error {
 	return nil
 }
 
-// apiKeyToMap converts an APIKey model to a map for HSET.
+// apiKeyToMap 将APIKey模型转换为HSET使用的map
 func (p *KeyProvider) apiKeyToMap(key *models.APIKey) map[string]any {
 	return map[string]any{
 		"id":             fmt.Sprint(key.ID),
@@ -744,7 +743,7 @@ func (p *KeyProvider) apiKeyToMap(key *models.APIKey) map[string]any {
 	}
 }
 
-// pluckIDs extracts IDs from a slice of APIKey.
+// pluckIDs 从APIKey切片中提取ID
 func pluckIDs(keys []models.APIKey) []uint {
 	ids := make([]uint, len(keys))
 	for i, key := range keys {
@@ -885,8 +884,7 @@ func (p *KeyProvider) CheckDailyRequestLimit(apiKey *models.APIKey, group *model
 	keyHashKey := fmt.Sprintf("key:%d", apiKey.ID)
 	activeKeysListKey := fmt.Sprintf("group:%d:active_keys", group.ID)
 
-	// 统一使用 UTC 日期，避免时区歧义和跨时区部署问题
-	// 注意：每日限制按 UTC 自然日计算
+		// 统一使用UTC日期，避免时区歧义和跨时区部署问题。每日限制按UTC自然日计算
 	now := time.Now().UTC()
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 

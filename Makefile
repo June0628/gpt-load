@@ -18,6 +18,30 @@ dev: ## Run in development mode (with race detection)
 	go run -race ./main.go
 
 # ==============================================================================
+# Local Development (SQLite/MySQL, no Docker)
+# ==============================================================================
+.PHONY: local-dev
+local-dev: ## Start local dev server with hot reload (SQLite + air)
+	@./dev-run.sh sqlite
+
+.PHONY: local-dev-mysql
+local-dev-mysql: ## Start local dev server with MySQL
+	@./dev-run.sh mysql
+
+.PHONY: local-test
+local-test: ## Run tests with SQLite
+	@echo "🧪 Running tests..."
+	@set -a && source .env.local 2>/dev/null && set +a && go test ./... -v
+
+.PHONY: local-migrate-test
+local-migrate-test: ## Test database migrations locally
+	@./dev-run.sh migrate-test
+
+.PHONY: local-clean
+local-clean: ## Clean local dev artifacts (db, logs, tmp)
+	@./dev-run.sh clean
+
+# ==============================================================================
 # Key Migration
 # ==============================================================================
 .PHONY: migrate-keys

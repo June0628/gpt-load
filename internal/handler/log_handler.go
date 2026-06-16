@@ -12,12 +12,12 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// LogResponse defines the structure for log entries in the API response
+// LogResponse 定义 API 响应中日志条目的结构
 type LogResponse struct {
 	models.RequestLog
 }
 
-// GetLogs handles fetching request logs with filtering and pagination.
+// GetLogs 处理带过滤和分页的请求日志获取。
 func (s *Server) GetLogs(c *gin.Context) {
 	query := s.LogService.GetLogsQuery(c)
 
@@ -45,13 +45,13 @@ func (s *Server) GetLogs(c *gin.Context) {
 	response.Success(c, pagination)
 }
 
-// ExportLogs handles exporting filtered log keys to a CSV file.
+// ExportLogs 处理将过滤后的日志密钥导出为 CSV 文件。
 func (s *Server) ExportLogs(c *gin.Context) {
 	filename := fmt.Sprintf("log_keys_export_%s.csv", time.Now().Format("20060102150405"))
 	c.Header("Content-Disposition", "attachment; filename="+filename)
 	c.Header("Content-Type", "text/csv; charset=utf-8")
 
-	// Stream the response
+	// 流式响应
 	err := s.LogService.StreamLogKeysToCSV(c, c.Writer)
 	if err != nil {
 		log.Printf("Failed to stream log keys to CSV: %v", err)

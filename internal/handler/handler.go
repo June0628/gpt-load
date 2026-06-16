@@ -1,14 +1,18 @@
-// Package handler provides HTTP handlers for the application
+// Package handler 提供应用程序的 HTTP 处理器
 package handler
 
 import (
 	"crypto/subtle"
 	"net/http"
+	"strconv"
 	"time"
 
 	"gpt-load/internal/config"
 	"gpt-load/internal/encryption"
+	app_errors "gpt-load/internal/errors"
 	"gpt-load/internal/i18n"
+	"gpt-load/internal/models"
+	"gpt-load/internal/response"
 	"gpt-load/internal/services"
 	"gpt-load/internal/types"
 
@@ -17,7 +21,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// Server contains dependencies for HTTP handlers
+// Server 包含 HTTP 处理器的依赖
 type Server struct {
 	DB                         *gorm.DB
 	config                     types.ConfigManager
@@ -36,7 +40,7 @@ type Server struct {
 	EncryptionSvc              encryption.Service
 }
 
-// NewServerParams defines the dependencies for the NewServer constructor.
+// NewServerParams 定义 NewServer 构造函数的依赖。
 type NewServerParams struct {
 	dig.In
 	DB                         *gorm.DB
@@ -56,7 +60,7 @@ type NewServerParams struct {
 	EncryptionSvc              encryption.Service
 }
 
-// NewServer creates a new handler instance with dependencies injected by dig.
+// NewServer 创建新的 handler 实例，通过 dig 注入依赖。
 func NewServer(params NewServerParams) *Server {
 	return &Server{
 		DB:                         params.DB,
@@ -77,18 +81,18 @@ func NewServer(params NewServerParams) *Server {
 	}
 }
 
-// LoginRequest represents the login request payload
+// LoginRequest 表示登录请求参数
 type LoginRequest struct {
 	AuthKey string `json:"auth_key" binding:"required"`
 }
 
-// LoginResponse represents the login response
+// LoginResponse 表示登录响应
 type LoginResponse struct {
 	Success bool   `json:"success"`
 	Message string `json:"message"`
 }
 
-// Login handles authentication verification
+// Login 处理身份验证
 func (s *Server) Login(c *gin.Context) {
 	var req LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -116,7 +120,47 @@ func (s *Server) Login(c *gin.Context) {
 	}
 }
 
-// Health handles health check requests
+// QueryBalance 手动触发分组余额查询
+func (s *Server) QueryBalance(c *gin.Context) {
+	groupIDStr := c.Param("id")
+	groupID, err := strconv.Atoi(groupIDStr)
+	if err != nil || groupID <= 0 {
+		response.Error(c, app_errors.NewAPIError(app_errors.ErrBadRequest, "无效的分组 ID"))
+		return
+	}
+
+	group, err := s.GroupManager.GetGroupByID(uint(groupID))
+	if err != nil {
+		response.Error(c, app_errors.ParseDBError(err))
+		return
+	}
+
+	if group.GroupType == "aggregate" {
+		response.Error(c, app_errors.NewAPIError(app_errors.ErrBadRequest, "聚合分组不支持余额查询"))
+		return
+	}
+
+	// 异步执行余额查询
+	go func(g *models.Group) {
+		s.KeyService.QueryGroupBalances(g)
+	}(group)
+
+	response.Success(c, gin.H{
+		"message":    "余额查询已启动",
+		"group_name": group.Name,
+	})
+}
+
+// ClearTask 强制清除卡住的任务
+func (s *Server) ClearTask(c *gin.Context) {
+	if err := s.TaskService.ForceClearTask(); err != nil {
+		response.Error(c, app_errors.NewAPIError(app_errors.ErrInternalServer, "清除任务失败"))
+		return
+	}
+	response.Success(c, gin.H{"message": "任务已清除"})
+}
+
+// Health 处理健康检查请求
 func (s *Server) Health(c *gin.Context) {
 	uptime := "unknown"
 	if startTime, exists := c.Get("serverStartTime"); exists {

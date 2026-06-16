@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"gpt-load/internal/store"
 	"time"
+
+	"github.com/sirupsen/logrus"
 )
 
 const (
@@ -19,7 +21,7 @@ const (
 	TaskTypeKeyDelete     = "KEY_DELETE"
 )
 
-// TaskStatus represents the full lifecycle of a long-running task.
+// TaskStatus 表示长时间运行任务的完整生命周期
 type TaskStatus struct {
 	TaskType        string     `json:"task_type"`
 	IsRunning       bool       `json:"is_running"`
@@ -33,12 +35,12 @@ type TaskStatus struct {
 	DurationSeconds float64    `json:"duration_seconds,omitempty"`
 }
 
-// TaskService manages the state of a single, global, long-running task using the store interface.
+// TaskService 使用 store 接口管理单个全局长时间运行任务的状态
 type TaskService struct {
 	store store.Store
 }
 
-// NewTaskService creates a new TaskService.
+// NewTaskService 创建新的 TaskService
 func NewTaskService(store store.Store) *TaskService {
 	return &TaskService{
 		store: store,
@@ -72,7 +74,7 @@ func (s *TaskService) StartTask(taskType, groupName string, total int) (*TaskSta
 	return status, nil
 }
 
-// GetTaskStatus returns the current status of the task.
+// GetTaskStatus 返回任务的当前状态
 func (s *TaskService) GetTaskStatus() (*TaskStatus, error) {
 	statusBytes, err := s.store.Get(globalTaskKey)
 	if err != nil {
@@ -87,6 +89,17 @@ func (s *TaskService) GetTaskStatus() (*TaskStatus, error) {
 		return nil, fmt.Errorf("failed to deserialize task status: %w", err)
 	}
 
+	// 如果任务标记为运行中但已超过30分钟，自动标记为失败并清除
+	if status.IsRunning && time.Since(status.StartedAt) > 30*time.Minute {
+		logrus.Warnf("Task '%s' has been running for over 30 minutes, auto-clearing stuck task", status.TaskType)
+		// 使用 EndTask 统一状态流转，记录超时错误
+		if err := s.EndTask(nil, fmt.Errorf("task timed out after 30 minutes")); err != nil {
+			logrus.WithError(err).Error("Failed to end timed-out task, forcing delete")
+			_ = s.store.Delete(globalTaskKey)
+		}
+		return &TaskStatus{IsRunning: false}, nil
+	}
+
 	if !status.IsRunning && status.FinishedAt != nil {
 		status.DurationSeconds = status.FinishedAt.Sub(status.StartedAt).Seconds()
 	}
@@ -94,7 +107,7 @@ func (s *TaskService) GetTaskStatus() (*TaskStatus, error) {
 	return &status, nil
 }
 
-// UpdateProgress updates the progress of the current task.
+// UpdateProgress 更新当前任务的进度
 func (s *TaskService) UpdateProgress(processed int) error {
 	status, err := s.GetTaskStatus()
 	if err != nil {
@@ -113,7 +126,7 @@ func (s *TaskService) UpdateProgress(processed int) error {
 	return s.store.Set(globalTaskKey, statusBytes, ResultTTL)
 }
 
-// EndTask marks the current task as finished and stores its final result.
+// EndTask 将当前任务标记为已完成并存储最终结果
 func (s *TaskService) EndTask(resultData any, taskErr error) error {
 	status, err := s.GetTaskStatus()
 	if err != nil {
@@ -139,4 +152,9 @@ func (s *TaskService) EndTask(resultData any, taskErr error) error {
 	}
 
 	return s.store.Set(globalTaskKey, updatedTaskBytes, ResultTTL)
+}
+
+// ForceClearTask 强制清除卡住的任务
+func (s *TaskService) ForceClearTask() error {
+	return s.store.Delete(globalTaskKey)
 }

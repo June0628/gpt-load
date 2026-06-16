@@ -450,6 +450,8 @@ export default {
     aggregateBalanceDescription: "有効にすると、グループカードに集計された総残高を表示",
     balanceLastUpdated: "最終更新",
     balanceQueryFailed: "照会失敗",
+    queryBalance: "今すぐ照会",
+    balanceQueryStarted: "残高照会を開始しました。更新して結果を確認してください",
     // キー失効設定
     keyExpirationConfig: "キー失効設定",
     keyExpirationConfigTooltip: "キーの失効戦略を設定し、キーがいつ使用できなくなるかを制御します",
@@ -635,6 +637,8 @@ export default {
     processing: "タスクを処理中...",
     completed: "タスクが完了しました。",
     hideProgress: "進捗を非表示",
+    clearTask: "スタックしたタスクをクリア",
+    taskCleared: "タスクがクリアされました",
     validatingKeys: "グループ [{groupName}] のキーを検証中",
     importingKeys: "グループ [{groupName}] にキーをインポート中",
     deletingKeys: "グループ [{groupName}] からキーを削除中",

@@ -17,14 +17,14 @@ import (
 	"gorm.io/datatypes"
 )
 
-// UpstreamInfo holds the information for a single upstream server, including its weight.
+// UpstreamInfo 保存单个上游服务器的信息，包括权重
 type UpstreamInfo struct {
 	URL           *url.URL
 	Weight        int
 	CurrentWeight int
 }
 
-// BaseChannel provides common functionality for channel proxies.
+// BaseChannel 提供通道代理的通用功能
 type BaseChannel struct {
 	Name               string
 	Upstreams          []UpstreamInfo
@@ -34,7 +34,7 @@ type BaseChannel struct {
 	ValidationEndpoint string
 	upstreamLock       sync.Mutex
 
-	// Cached fields from the group for stale check
+	// 从分组缓存的字段用于过期检查
 	channelType         string
 	groupUpstreams      datatypes.JSON
 	effectiveConfig     *types.SystemSettings
@@ -42,7 +42,7 @@ type BaseChannel struct {
 	modelRedirectStrict bool
 }
 
-// getUpstreamURL selects an upstream URL using a smooth weighted round-robin algorithm.
+// getUpstreamURL 使用平滑加权轮询算法选择上游URL
 func (b *BaseChannel) getUpstreamURL() *url.URL {
 	b.upstreamLock.Lock()
 	defer b.upstreamLock.Unlock()
@@ -75,7 +75,7 @@ func (b *BaseChannel) getUpstreamURL() *url.URL {
 	return best.URL
 }
 
-// BuildUpstreamURL constructs the target URL for the upstream service.
+// BuildUpstreamURL 构建上游服务的目标URL
 func (b *BaseChannel) BuildUpstreamURL(originalURL *url.URL, groupName string) (string, error) {
 	base := b.getUpstreamURL()
 	if base == nil {
@@ -94,7 +94,7 @@ func (b *BaseChannel) BuildUpstreamURL(originalURL *url.URL, groupName string) (
 	return finalURL.String(), nil
 }
 
-// IsConfigStale checks if the channel's configuration is stale compared to the provided group.
+// IsConfigStale 检查通道配置是否与提供的分组相比已过期
 func (b *BaseChannel) IsConfigStale(group *models.Group) bool {
 	if b.channelType != group.ChannelType {
 		return true
@@ -111,7 +111,7 @@ func (b *BaseChannel) IsConfigStale(group *models.Group) bool {
 	if !reflect.DeepEqual(b.effectiveConfig, &group.EffectiveConfig) {
 		return true
 	}
-	// Check for model redirect rules changes
+	// 检查模型重定向规则变更
 	if !reflect.DeepEqual(b.modelRedirectRules, group.ModelRedirectRules) {
 		return true
 	}
@@ -121,17 +121,17 @@ func (b *BaseChannel) IsConfigStale(group *models.Group) bool {
 	return false
 }
 
-// GetHTTPClient returns the client for standard requests.
+// GetHTTPClient 返回标准请求的客户端
 func (b *BaseChannel) GetHTTPClient() *http.Client {
 	return b.HTTPClient
 }
 
-// GetStreamClient returns the client for streaming requests.
+// GetStreamClient 返回流式请求的客户端
 func (b *BaseChannel) GetStreamClient() *http.Client {
 	return b.StreamClient
 }
 
-// ApplyModelRedirect applies model redirection based on the group's redirect rules.
+// ApplyModelRedirect 根据分组的重定向规则应用模型重定向
 func (b *BaseChannel) ApplyModelRedirect(req *http.Request, bodyBytes []byte, group *models.Group) ([]byte, error) {
 	if len(group.ModelRedirectMap) == 0 || len(bodyBytes) == 0 {
 		return bodyBytes, nil
@@ -152,11 +152,11 @@ func (b *BaseChannel) ApplyModelRedirect(req *http.Request, bodyBytes []byte, gr
 		return bodyBytes, nil
 	}
 
-	// Direct match without any prefix processing
+	// 直接匹配，无需前缀处理
 	if targetModel, found := group.ModelRedirectMap[model]; found {
 		requestData["model"] = targetModel
 
-		// Log the redirection for audit
+		// 记录重定向用于审计
 		logrus.WithFields(logrus.Fields{
 			"group":          group.Name,
 			"original_model": model,
@@ -174,7 +174,7 @@ func (b *BaseChannel) ApplyModelRedirect(req *http.Request, bodyBytes []byte, gr
 	return bodyBytes, nil
 }
 
-// TransformModelList transforms the model list response based on redirect rules.
+// TransformModelList 根据重定向规则转换模型列表响应
 func (b *BaseChannel) TransformModelList(req *http.Request, bodyBytes []byte, group *models.Group) (map[string]any, error) {
 	var response map[string]any
 	if err := json.Unmarshal(bodyBytes, &response); err != nil {
@@ -192,10 +192,10 @@ func (b *BaseChannel) TransformModelList(req *http.Request, bodyBytes []byte, gr
 		return response, nil
 	}
 
-	// Build configured source models list (common logic for both modes)
+	// 构建已配置的源模型列表（两种模式的通用逻辑）
 	configuredModels := buildConfiguredModels(group.ModelRedirectMap)
 
-	// Strict mode: return only configured models (whitelist)
+	// 严格模式：仅返回已配置的模型（白名单）
 	if group.ModelRedirectStrict {
 		response["data"] = configuredModels
 
@@ -208,7 +208,7 @@ func (b *BaseChannel) TransformModelList(req *http.Request, bodyBytes []byte, gr
 		return response, nil
 	}
 
-	// Non-strict mode: merge upstream + configured models (upstream priority)
+	// 非严格模式：合并上游+已配置的模型（上游优先）
 	merged := mergeModelLists(upstreamModels, configuredModels)
 	response["data"] = merged
 
@@ -223,7 +223,7 @@ func (b *BaseChannel) TransformModelList(req *http.Request, bodyBytes []byte, gr
 	return response, nil
 }
 
-// GetBalanceQueryPath returns the balance query path for the channel.
+// GetBalanceQueryPath 返回通道的余额查询路径
 func (b *BaseChannel) GetBalanceQueryPath(group *models.Group) string {
 	if group.BalanceQueryPath != "" {
 		return group.BalanceQueryPath
@@ -232,7 +232,7 @@ func (b *BaseChannel) GetBalanceQueryPath(group *models.Group) string {
 	return ""
 }
 
-// buildConfiguredModels builds a list of models from redirect rules
+// buildConfiguredModels 根据重定向规则构建模型列表
 func buildConfiguredModels(redirectMap map[string]string) []any {
 	if len(redirectMap) == 0 {
 		return []any{}
@@ -250,9 +250,9 @@ func buildConfiguredModels(redirectMap map[string]string) []any {
 	return models
 }
 
-// mergeModelLists merges upstream and configured model lists
+// mergeModelLists 合并上游和已配置的模型列表
 func mergeModelLists(upstream []any, configured []any) []any {
-	// Create set of upstream model IDs
+	// 创建上游模型ID集合
 	upstreamIDs := make(map[string]bool)
 	for _, item := range upstream {
 		if modelObj, ok := item.(map[string]any); ok {
@@ -262,11 +262,11 @@ func mergeModelLists(upstream []any, configured []any) []any {
 		}
 	}
 
-	// Start with all upstream models
+	// 以上游所有模型开始
 	result := make([]any, len(upstream))
 	copy(result, upstream)
 
-	// Add configured models that don't exist in upstream
+	// 添加上游中不存在的已配置模型
 	for _, item := range configured {
 		if modelObj, ok := item.(map[string]any); ok {
 			if modelID, ok := modelObj["id"].(string); ok {

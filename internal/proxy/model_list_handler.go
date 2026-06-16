@@ -12,13 +12,13 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// shouldInterceptModelList checks if this is a model list request that should be intercepted
+// shouldInterceptModelList 检查是否为需要拦截的模型列表请求
 func shouldInterceptModelList(path string, method string) bool {
 	if method != "GET" {
 		return false
 	}
 
-	// Check various model list endpoints
+	// 检查各种模型列表端点
 	return strings.HasSuffix(path, "/v1/models") ||
 		strings.HasSuffix(path, "/v1beta/models") ||
 		strings.Contains(path, "/v1beta/openai/v1/models")
@@ -28,7 +28,7 @@ func shouldInterceptModelList(path string, method string) bool {
 func (ps *ProxyServer) handleModelListResponse(c *gin.Context, resp *http.Response, group *models.Group, channelHandler channel.ChannelProxy) {
 	defer resp.Body.Close()
 
-	// Read the upstream response body
+	// 读取上游响应体
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
 		logrus.WithError(err).Error("Failed to read model list response body")
@@ -36,7 +36,7 @@ func (ps *ProxyServer) handleModelListResponse(c *gin.Context, resp *http.Respon
 		return
 	}
 
-	// Decompress response data based on Content-Encoding
+	// 根据Content-Encoding解压响应数据
 	contentEncoding := resp.Header.Get("Content-Encoding")
 	decompressed, err := utils.DecompressResponse(contentEncoding, bodyBytes)
 	if err != nil {
@@ -44,7 +44,7 @@ func (ps *ProxyServer) handleModelListResponse(c *gin.Context, resp *http.Respon
 		decompressed = bodyBytes
 	}
 
-	// Transform model list (returns map[string]any directly, no marshaling)
+	// 转换模型列表（直接返回map[string]any，无需编组）
 	response, err := channelHandler.TransformModelList(c.Request, decompressed, group)
 	if err != nil {
 		logrus.WithError(err).Error("Failed to transform model list")

@@ -14,14 +14,14 @@ import (
 	"gorm.io/gorm"
 )
 
-// ManualValidationResult holds the result of a manual validation task.
+// ManualValidationResult 保存手动验证任务的结果
 type ManualValidationResult struct {
 	TotalKeys   int `json:"total_keys"`
 	ValidKeys   int `json:"valid_keys"`
 	InvalidKeys int `json:"invalid_keys"`
 }
 
-// KeyManualValidationService handles user-initiated key validation for a group.
+// KeyManualValidationService 处理用户发起的分组密钥验证
 type KeyManualValidationService struct {
 	DB              *gorm.DB
 	Validator       *keypool.KeyValidator
@@ -31,7 +31,7 @@ type KeyManualValidationService struct {
 	EncryptionSvc   encryption.Service
 }
 
-// NewKeyManualValidationService creates a new KeyManualValidationService.
+// NewKeyManualValidationService 创建新的 KeyManualValidationService
 func NewKeyManualValidationService(db *gorm.DB, validator *keypool.KeyValidator, taskService *TaskService, settingsManager *config.SystemSettingsManager, configManager types.ConfigManager, encryptionSvc encryption.Service) *KeyManualValidationService {
 	return &KeyManualValidationService{
 		DB:              db,
@@ -43,7 +43,7 @@ func NewKeyManualValidationService(db *gorm.DB, validator *keypool.KeyValidator,
 	}
 }
 
-// StartValidationTask starts a new manual validation task for a given group.
+// StartValidationTask 为指定分组启动新的手动验证任务
 func (s *KeyManualValidationService) StartValidationTask(group *models.Group, status string) (*TaskStatus, error) {
 	var keys []models.APIKey
 	query := s.DB.Where("group_id = ?", group.ID)
@@ -63,7 +63,7 @@ func (s *KeyManualValidationService) StartValidationTask(group *models.Group, st
 		return nil, err
 	}
 
-	// Run the validation in a separate goroutine
+	// 在单独的 goroutine 中运行验证
 	go s.runValidation(group, keys, status)
 
 	return taskStatus, nil
@@ -110,7 +110,7 @@ func (s *KeyManualValidationService) runValidation(group *models.Group, keys []m
 			validCount++
 		}
 
-		// Throttle progress updates to once per second
+		// 节流进度更新，每秒一次
 		if time.Since(lastUpdateTime) > time.Second {
 			if err := s.TaskService.UpdateProgress(processedCount); err != nil {
 				logrus.Warnf("Failed to update task progress: %v", err)
@@ -119,7 +119,7 @@ func (s *KeyManualValidationService) runValidation(group *models.Group, keys []m
 		}
 	}
 
-	// Ensure the final progress is always updated
+	// 确保最终进度总是被更新
 	if err := s.TaskService.UpdateProgress(processedCount); err != nil {
 		logrus.Warnf("Failed to update final task progress: %v", err)
 	}
@@ -130,7 +130,7 @@ func (s *KeyManualValidationService) runValidation(group *models.Group, keys []m
 		InvalidKeys: len(keys) - validCount,
 	}
 
-	// End the task and store the final result
+	// 结束任务并存储最终结果
 	if err := s.TaskService.EndTask(result, nil); err != nil {
 		logrus.Errorf("Failed to end task for group %s: %v", group.Name, err)
 	}
@@ -141,7 +141,7 @@ func (s *KeyManualValidationService) runValidation(group *models.Group, keys []m
 func (s *KeyManualValidationService) validationWorker(wg *sync.WaitGroup, group *models.Group, jobs <-chan models.APIKey, results chan<- bool) {
 	defer wg.Done()
 	for key := range jobs {
-		// Decrypt the key before validation
+		// 验证前先解密密钥
 		decryptedKey, err := s.EncryptionSvc.Decrypt(key.KeyValue)
 		if err != nil {
 			logrus.WithError(err).WithField("key_id", key.ID).Error("Manual validation: Failed to decrypt key for validation, marking as invalid")
@@ -149,7 +149,7 @@ func (s *KeyManualValidationService) validationWorker(wg *sync.WaitGroup, group 
 			continue
 		}
 
-		// Create a copy with decrypted value for validation
+		// 创建带解密值的副本用于验证
 		keyForValidation := key
 		keyForValidation.KeyValue = decryptedKey
 

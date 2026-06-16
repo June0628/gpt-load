@@ -30,7 +30,7 @@ const (
 	DefaultLogFlushBatchSize = 200
 )
 
-// RequestLogService is responsible for managing request logs.
+// RequestLogService 负责管理请求日志
 type RequestLogService struct {
 	db              *gorm.DB
 	store           store.Store
@@ -40,7 +40,7 @@ type RequestLogService struct {
 	ticker          *time.Ticker
 }
 
-// NewRequestLogService creates a new RequestLogService instance
+// NewRequestLogService 创建新的 RequestLogService 实例
 func NewRequestLogService(db *gorm.DB, store store.Store, sm *config.SystemSettingsManager) *RequestLogService {
 	return &RequestLogService{
 		db:              db,
@@ -50,7 +50,7 @@ func NewRequestLogService(db *gorm.DB, store store.Store, sm *config.SystemSetti
 	}
 }
 
-// Start initializes the service and starts the periodic flush routine
+// Start 初始化服务并启动定期刷新例程
 func (s *RequestLogService) Start() {
 	s.wg.Add(1)
 	go s.runLoop()
@@ -59,7 +59,7 @@ func (s *RequestLogService) Start() {
 func (s *RequestLogService) runLoop() {
 	defer s.wg.Done()
 
-	// Initial flush on start
+	// 启动时初始刷新
 	s.flush()
 
 	interval := time.Duration(s.settingsManager.GetSettings().RequestLogWriteIntervalMinutes) * time.Minute
@@ -88,7 +88,7 @@ func (s *RequestLogService) runLoop() {
 	}
 }
 
-// Stop gracefully stops the RequestLogService
+// Stop 优雅停止 RequestLogService
 func (s *RequestLogService) Stop(ctx context.Context) {
 	close(s.stopChan)
 
@@ -107,7 +107,7 @@ func (s *RequestLogService) Stop(ctx context.Context) {
 	}
 }
 
-// Record logs a request to the database and cache
+// Record 将请求记录到数据库和缓存
 func (s *RequestLogService) Record(log *models.RequestLog) error {
 	log.ID = uuid.NewString()
 	log.Timestamp = time.Now()
@@ -278,7 +278,7 @@ func (s *RequestLogService) ensureDailyLogTable(tx *gorm.DB, logDate time.Time) 
 	return tx.Exec(createTableSQL).Error
 }
 
-// writeLogsToDB writes a batch of request logs to the database
+// writeLogsToDB 将一批请求日志写入数据库
 func (s *RequestLogService) writeLogsToDB(logs []*models.RequestLog) error {
 	if len(logs) == 0 {
 		return nil

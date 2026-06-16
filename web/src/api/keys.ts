@@ -279,6 +279,11 @@ export const keysApi = {
     return res.data;
   },
 
+  // 强制清除卡住的任务
+  async clearTask(): Promise<void> {
+    await http.post("/tasks/clear", {}, { hideMessage: true });
+  },
+
   // 获取聚合分组的子分组列表
   async getSubGroups(aggregateGroupId: number): Promise<import("@/types/models").SubGroupInfo[]> {
     const res = await http.get(`/groups/${aggregateGroupId}/sub-groups`);
@@ -315,5 +320,11 @@ export const keysApi = {
   async getParentAggregateGroups(groupId: number): Promise<ParentAggregateGroup[]> {
     const res = await http.get(`/groups/${groupId}/parent-aggregate-groups`);
     return res.data || [];
+  },
+
+  // 手动触发分组余额查询
+  async queryGroupBalance(groupId: number): Promise<{ message: string; group_name: string }> {
+    const res = await http.post(`/groups/${groupId}/query-balance`, {}, { hideMessage: true });
+    return res.data;
   },
 };

@@ -65,7 +65,7 @@ func NewDB(configManager types.ConfigManager) (*gorm.DB, error) {
 	var err error
 	DB, err = gorm.Open(dialector, &gorm.Config{
 		Logger:      newLogger,
-		PrepareStmt: true,
+		PrepareStmt: !isSQLite, // SQLite 不启用 prepared statement，避免连接不释放
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)

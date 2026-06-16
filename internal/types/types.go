@@ -1,6 +1,6 @@
 package types
 
-// ConfigManager defines the interface for configuration management
+// ConfigManager 定义配置管理接口
 type ConfigManager interface {
 	IsMaster() bool
 	GetAuthConfig() AuthConfig
@@ -61,11 +61,11 @@ type SystemSettings struct {
 	// 通知配置
 	InvalidKeyCountThreshold int `json:"invalid_key_count_threshold" default:"0" name:"config.invalid_key_count_threshold" category:"config.category.key" desc:"config.invalid_key_count_threshold_desc" validate:"min=0"`
 
-	// For cache
+	// 用于缓存
 	ProxyKeysMap map[string]struct{} `json:"-"`
 }
 
-// ServerConfig represents server configuration
+// ServerConfig 表示服务器配置
 type ServerConfig struct {
 	Port                    int    `json:"port"`
 	Host                    string `json:"host"`
@@ -76,12 +76,12 @@ type ServerConfig struct {
 	GracefulShutdownTimeout int    `json:"graceful_shutdown_timeout"`
 }
 
-// AuthConfig represents authentication configuration
+// AuthConfig 表示认证配置
 type AuthConfig struct {
 	Key string `json:"key"`
 }
 
-// CORSConfig represents CORS configuration
+// CORSConfig 表示 CORS 配置
 type CORSConfig struct {
 	Enabled          bool     `json:"enabled"`
 	AllowedOrigins   []string `json:"allowed_origins"`
@@ -90,12 +90,12 @@ type CORSConfig struct {
 	AllowCredentials bool     `json:"allow_credentials"`
 }
 
-// PerformanceConfig represents performance configuration
+// PerformanceConfig 表示性能配置
 type PerformanceConfig struct {
 	MaxConcurrentRequests int `json:"max_concurrent_requests"`
 }
 
-// LogConfig represents logging configuration
+// LogConfig 表示日志配置
 type LogConfig struct {
 	Level      string `json:"level"`
 	Format     string `json:"format"`
@@ -103,27 +103,27 @@ type LogConfig struct {
 	FilePath   string `json:"file_path"`
 }
 
-// LogUploadConfig represents log upload configuration for external storage
+// LogUploadConfig 表示外部存储的日志上传配置
 type LogUploadConfig struct {
-	// Common settings
+	// 通用设置
 	EnableAutoUpload    bool   `json:"enable_auto_upload"`
 	UploadBeforeDelete  bool   `json:"upload_before_delete"`
 	UploadDirectory     string `json:"upload_directory"`
 	UploadFilenamePrefix string `json:"upload_filename_prefix"`
 
-	// Tencent COS settings
+	// 腾讯 COS 设置
 	TencentSecretID     string `json:"tencent_secret_id"`
 	TencentSecretKey    string `json:"tencent_secret_key"`
 	TencentCOSBucket    string `json:"tencent_cos_bucket"`
 	TencentCOSRegion    string `json:"tencent_cos_region"`
 
-	// WebDAV settings
+	// WebDAV 设置
 	WebDAVURL      string `json:"webdav_url"`
 	WebDAVUsername string `json:"webdav_username"`
 	WebDAVPassword string `json:"webdav_password"`
 }
 
-// DatabaseConfig represents database configuration
+// DatabaseConfig 表示数据库配置
 type DatabaseConfig struct {
 	DSN string `json:"dsn"`
 }

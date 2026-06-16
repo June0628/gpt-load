@@ -1,4 +1,4 @@
-// Package proxy provides high-performance OpenAI multi-key proxy server
+// Package proxy 提供高性能 OpenAI 多密钥代理服务器
 package proxy
 
 import (
@@ -26,7 +26,7 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// ProxyServer represents the proxy server
+// ProxyServer 代理服务器
 type ProxyServer struct {
 	keyProvider       *keypool.KeyProvider
 	groupManager      *services.GroupManager
@@ -37,7 +37,7 @@ type ProxyServer struct {
 	encryptionSvc     encryption.Service
 }
 
-// NewProxyServer creates a new proxy server
+// NewProxyServer 创建新的代理服务器
 func NewProxyServer(
 	keyProvider *keypool.KeyProvider,
 	groupManager *services.GroupManager,
@@ -69,7 +69,7 @@ func (ps *ProxyServer) HandleProxy(c *gin.Context) {
 		return
 	}
 
-	// Select sub-group if this is an aggregate group
+	// 如果是聚合组则选择子组
 	subGroupName, err := ps.subGroupManager.SelectSubGroup(originalGroup)
 	if err != nil {
 		logrus.WithFields(logrus.Fields{
@@ -190,12 +190,12 @@ func (ps *ProxyServer) executeRequestWithRetry(
 			req.Header.Del(h)
 		}
 
-		// Clean up client auth key
+		// 清除客户端认证密钥
 		req.Header.Del("Authorization")
 		req.Header.Del("X-Api-Key")
 		req.Header.Del("X-Goog-Api-Key")
 
-		// Apply model redirection
+		// 应用模型重定向
 		finalBodyBytes, err := channelHandler.ApplyModelRedirect(req, bodyBytes, group)
 		if err != nil {
 			cancel()
@@ -204,7 +204,7 @@ func (ps *ProxyServer) executeRequestWithRetry(
 			return
 		}
 
-		// Update request body if it was modified by redirection
+		// 如果请求体被重定向修改则更新
 		if !bytes.Equal(finalBodyBytes, bodyBytes) {
 			req.Body = io.NopCloser(bytes.NewReader(finalBodyBytes))
 			req.ContentLength = int64(len(finalBodyBytes))
@@ -212,7 +212,7 @@ func (ps *ProxyServer) executeRequestWithRetry(
 
 		channelHandler.ModifyRequest(req, apiKey, group)
 
-		// Apply custom header rules
+		// 应用自定义头部规则
 		if len(group.HeaderRuleList) > 0 {
 			headerCtx := utils.NewHeaderVariableContextFromGin(c, group, apiKey)
 			utils.ApplyHeaderRules(req, group.HeaderRuleList, headerCtx)
@@ -228,8 +228,7 @@ func (ps *ProxyServer) executeRequestWithRetry(
 
 		resp, err := client.Do(req)
 
-		// Unified error handling for retries.
-		// Retry policy is fully defined by group.FailoverStatusCodeMatcher (derived from EffectiveConfig).
+		// 统一的重试错误处理，重试策略由 group.FailoverStatusCodeMatcher 定义
 		shouldRetryByStatus := resp != nil && shouldFailoverOnStatusCode(resp.StatusCode, group)
 		if err != nil || shouldRetryByStatus {
 			if err != nil && app_errors.IsIgnorableError(err) {
@@ -252,7 +251,7 @@ func (ps *ProxyServer) executeRequestWithRetry(
 				parsedError = errorMessage
 				logrus.Debugf("Request failed (attempt %d/%d) for key %s: %v", retryCount+1, maxRetries+1, utils.MaskAPIKey(apiKey.KeyValue), err)
 			} else {
-				// Retryable upstream response (HTTP status code matched failover policy)
+				// 可重试的上游响应（HTTP状态码匹配故障转移策略）
 				statusCode = resp.StatusCode
 				errorBody, readErr := io.ReadAll(resp.Body)
 				resp.Body.Close()
@@ -295,7 +294,7 @@ func (ps *ProxyServer) executeRequestWithRetry(
 			continue
 		}
 
-		// Success: resp is guaranteed non-nil here (shouldRetryByStatus checks resp != nil)
+		// 成功：此处 resp 保证非空（shouldRetryByStatus 已检查 resp != nil）
 		// 注意：resp.Body 必须由下游 handler 读取后再关闭，不能在这里关闭
 		defer resp.Body.Close()
 
@@ -304,7 +303,7 @@ func (ps *ProxyServer) executeRequestWithRetry(
 		// 增加每日请求计数
 		ps.keyProvider.IncrementDailyRequestCount(apiKey, group)
 
-		// Check if this is a model list request (needs special handling)
+		// 检查是否为模型列表请求（需要特殊处理）
 		if shouldInterceptModelList(c.Request.URL.Path, c.Request.Method) {
 			defer cancel()
 			ps.handleModelListResponse(c, resp, group, channelHandler)
@@ -387,7 +386,7 @@ func (ps *ProxyServer) logRequest(
 		AgentFiles:   agentFilesToLog,
 	}
 
-	// Set parent group
+	// 设置父组
 	if originalGroup != nil && originalGroup.GroupType == "aggregate" && originalGroup.ID != group.ID {
 		logEntry.ParentGroupID = originalGroup.ID
 		logEntry.ParentGroupName = originalGroup.Name

@@ -1,4 +1,4 @@
-// Package middleware provides HTTP middleware for the application
+// Package middleware 提供应用的 HTTP 中间件
 package middleware
 
 import (
@@ -16,7 +16,7 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// Logger creates a high-performance logging middleware
+// Logger 创建高性能日志中间件
 func Logger(config types.LogConfig) gin.HandlerFunc {
 	return func(c *gin.Context) {
 
@@ -24,23 +24,23 @@ func Logger(config types.LogConfig) gin.HandlerFunc {
 		path := c.Request.URL.Path
 		raw := c.Request.URL.RawQuery
 
-		// Process request
+		// 处理请求
 		c.Next()
 
-		// Calculate response time
+		// 计算响应时间
 		latency := time.Since(start)
 
-		// Get basic information
+		// 获取基本信息
 		method := c.Request.Method
 		statusCode := c.Writer.Status()
 
-		// Build full path (avoid string concatenation)
+		// 构建完整路径（避免字符串拼接）
 		fullPath := path
 		if raw != "" {
 			fullPath = path + "?" + raw
 		}
 
-		// Get key information (if exists)
+		// 获取密钥信息（如果存在）
 		keyInfo := ""
 		if keyIndex, exists := c.Get("keyIndex"); exists {
 			if keyPreview, exists := c.Get("keyPreview"); exists {
@@ -48,22 +48,22 @@ func Logger(config types.LogConfig) gin.HandlerFunc {
 			}
 		}
 
-		// Get retry information (if exists)
+		// 获取重试信息（如果存在）
 		retryInfo := ""
 		if retryCount, exists := c.Get("retryCount"); exists {
 			retryInfo = fmt.Sprintf(" - Retry[%d]", retryCount)
 		}
 
-		// Filter health check and other monitoring endpoint logs to reduce noise
+		// 过滤健康检查和其他监控端点日志以减少噪音
 		if isMonitoringEndpoint(path) {
-			// Only log errors for monitoring endpoints
+			// 监控端点只记录错误
 			if statusCode >= 400 {
 				logrus.Warnf("%s %s - %d - %v", method, fullPath, statusCode, latency)
 			}
 			return
 		}
 
-		// Choose log level based on status code
+		// 根据状态码选择日志级别
 		if statusCode >= 500 {
 			logrus.Errorf("%s %s - %d - %v%s%s", method, fullPath, statusCode, latency, keyInfo, retryInfo)
 		} else if statusCode >= 400 {
@@ -74,7 +74,7 @@ func Logger(config types.LogConfig) gin.HandlerFunc {
 	}
 }
 
-// CORS creates a CORS middleware
+// CORS 创建 CORS 中间件
 func CORS(config types.CORSConfig) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if !config.Enabled {
@@ -84,7 +84,7 @@ func CORS(config types.CORSConfig) gin.HandlerFunc {
 
 		origin := c.Request.Header.Get("Origin")
 
-		// Check if origin is allowed
+		// 检查来源是否被允许
 		allowed := false
 		for _, allowedOrigin := range config.AllowedOrigins {
 			if allowedOrigin == "*" || allowedOrigin == origin {
@@ -97,7 +97,7 @@ func CORS(config types.CORSConfig) gin.HandlerFunc {
 			c.Header("Access-Control-Allow-Origin", origin)
 		}
 
-		// Set other CORS headers
+		// 设置其他 CORS 头
 		c.Header("Access-Control-Allow-Methods", strings.Join(config.AllowedMethods, ", "))
 		c.Header("Access-Control-Allow-Headers", strings.Join(config.AllowedHeaders, ", "))
 
@@ -105,7 +105,7 @@ func CORS(config types.CORSConfig) gin.HandlerFunc {
 			c.Header("Access-Control-Allow-Credentials", "true")
 		}
 
-		// Handle preflight requests
+		// 处理预检请求
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(204)
 			return
@@ -115,7 +115,7 @@ func CORS(config types.CORSConfig) gin.HandlerFunc {
 	}
 }
 
-// Auth creates an authentication middleware
+// Auth 创建认证中间件
 func Auth(authConfig types.AuthConfig) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		path := c.Request.URL.Path
@@ -139,10 +139,10 @@ func Auth(authConfig types.AuthConfig) gin.HandlerFunc {
 	}
 }
 
-// ProxyAuth
+// ProxyAuth 创建代理认证中间件
 func ProxyAuth(gm *services.GroupManager) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Check key
+		// 检查密钥
 		key := extractAuthKey(c)
 		if key == "" {
 			response.Error(c, app_errors.ErrUnauthorized)
@@ -157,7 +157,7 @@ func ProxyAuth(gm *services.GroupManager) gin.HandlerFunc {
 			return
 		}
 
-		// Check both key collections to prevent timing attacks
+		// 检查两个密钥集合以防止时序攻击
 		// 注意：必须同时执行两个查找，避免短路求值导致的时序差异
 		_, existsInEffective := group.EffectiveConfig.ProxyKeysMap[key]
 		_, existsInGroup := group.ProxyKeysMap[key]
@@ -173,7 +173,7 @@ func ProxyAuth(gm *services.GroupManager) gin.HandlerFunc {
 	}
 }
 
-// ProxyRouteDispatcher dispatches special routes before proxy authentication
+// ProxyRouteDispatcher 在代理认证前分发特殊路由
 func ProxyRouteDispatcher(serverHandler interface{ GetIntegrationInfo(*gin.Context) }) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if c.Param("path") == "/api/integration/info" {
@@ -186,7 +186,7 @@ func ProxyRouteDispatcher(serverHandler interface{ GetIntegrationInfo(*gin.Conte
 	}
 }
 
-// Recovery creates a recovery middleware with custom error handling
+// Recovery 创建带自定义错误处理的恢复中间件
 func Recovery() gin.HandlerFunc {
 	return gin.CustomRecovery(func(c *gin.Context, recovered any) {
 		logrus.Errorf("Panic recovered: %v", recovered)
@@ -195,9 +195,9 @@ func Recovery() gin.HandlerFunc {
 	})
 }
 
-// RateLimiter creates a simple rate limiting middleware
+// RateLimiter 创建简单的速率限制中间件
 func RateLimiter(config types.PerformanceConfig) gin.HandlerFunc {
-	// Simple semaphore-based rate limiting
+	// 基于信号量的简单速率限制
 	semaphore := make(chan struct{}, config.MaxConcurrentRequests)
 
 	return func(c *gin.Context) {
@@ -212,29 +212,29 @@ func RateLimiter(config types.PerformanceConfig) gin.HandlerFunc {
 	}
 }
 
-// ErrorHandler creates an error handling middleware
+// ErrorHandler 创建错误处理中间件
 func ErrorHandler() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Next()
 
-		// Handle any errors that occurred during request processing
+		// 处理请求处理期间发生的任何错误
 		if len(c.Errors) > 0 {
 			err := c.Errors.Last().Err
 
-			// Check if it's our custom error type
+			// 检查是否是自定义错误类型
 			if apiErr, ok := err.(*app_errors.APIError); ok {
 				response.Error(c, apiErr)
 				return
 			}
 
-			// Handle other errors
+			// 处理其他错误
 			logrus.Errorf("Unhandled error: %v", err)
 			response.Error(c, app_errors.ErrInternalServer)
 		}
 	}
 }
 
-// isMonitoringEndpoint checks if the path is a monitoring endpoint
+// isMonitoringEndpoint 检查路径是否为监控端点
 func isMonitoringEndpoint(path string) bool {
 	monitoringPaths := []string{"/health"}
 	for _, monitoringPath := range monitoringPaths {
@@ -245,9 +245,9 @@ func isMonitoringEndpoint(path string) bool {
 	return false
 }
 
-// extractAuthKey extracts a auth key.
+// extractAuthKey 提取认证密钥
 func extractAuthKey(c *gin.Context) string {
-	// Query key
+	// 查询参数中的密钥
 	if key := c.Query("key"); key != "" {
 		query := c.Request.URL.Query()
 		query.Del("key")
@@ -277,7 +277,7 @@ func extractAuthKey(c *gin.Context) string {
 	return ""
 }
 
-// StaticCache creates a middleware for caching static resources
+// StaticCache 创建静态资源缓存中间件
 func StaticCache() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		path := c.Request.URL.Path
@@ -317,7 +317,7 @@ func isStaticResource(path string) bool {
 	return false
 }
 
-// SecurityHeaders creates a middleware to add security-related headers
+// SecurityHeaders 创建安全相关头的中间件
 func SecurityHeaders() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Header("X-Content-Type-Options", "nosniff")

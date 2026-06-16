@@ -7,15 +7,15 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// CommonHandler handles common, non-grouped requests.
+// CommonHandler 处理通用的、非分组的请求。
 type CommonHandler struct{}
 
-// NewCommonHandler creates a new CommonHandler.
+// NewCommonHandler 创建新的 CommonHandler。
 func NewCommonHandler() *CommonHandler {
 	return &CommonHandler{}
 }
 
-// GetChannelTypes returns a list of available channel types.
+// GetChannelTypes 返回可用的通道类型列表。
 func (h *CommonHandler) GetChannelTypes(c *gin.Context) {
 	channelTypes := channel.GetChannels()
 	response.Success(c, channelTypes)

@@ -17,7 +17,7 @@ import (
 
 const GroupUpdateChannel = "groups:updated"
 
-// GroupManager manages the caching of group data.
+// GroupManager 管理分组数据的缓存
 type GroupManager struct {
 	syncer          *syncer.CacheSyncer[map[string]*models.Group]
 	db              *gorm.DB
@@ -26,7 +26,7 @@ type GroupManager struct {
 	subGroupManager *SubGroupManager
 }
 
-// NewGroupManager creates a new, uninitialized GroupManager.
+// NewGroupManager 创建未初始化的 GroupManager
 func NewGroupManager(
 	db *gorm.DB,
 	store store.Store,
@@ -41,7 +41,7 @@ func NewGroupManager(
 	}
 }
 
-// Initialize sets up the CacheSyncer. This is called separately to handle potential
+// Initialize 设置 CacheSyncer。单独调用以处理潜在的错误
 func (gm *GroupManager) Initialize() error {
 	loader := func() (map[string]*models.Group, error) {
 		var groups []*models.Group
@@ -49,19 +49,19 @@ func (gm *GroupManager) Initialize() error {
 			return nil, fmt.Errorf("failed to load groups from db: %w", err)
 		}
 
-		// Load all sub-group relationships for aggregate groups (only valid ones with weight > 0)
+		// 加载聚合分组的所有子分组关系（仅有效的，权重 > 0 的）
 		var allSubGroups []models.GroupSubGroup
 		if err := gm.db.Where("weight > 0").Find(&allSubGroups).Error; err != nil {
 			return nil, fmt.Errorf("failed to load valid sub groups: %w", err)
 		}
 
-		// Group sub-groups by aggregate group ID
+		// 按聚合分组 ID 对子分组进行分组
 		subGroupsByAggregateID := make(map[uint][]models.GroupSubGroup)
 		for _, sg := range allSubGroups {
 			subGroupsByAggregateID[sg.GroupID] = append(subGroupsByAggregateID[sg.GroupID], sg)
 		}
 
-		// Create group ID to group object mapping for sub-group lookups
+		// 创建分组 ID 到分组对象的映射，用于子分组查找
 		groupByID := make(map[uint]*models.Group)
 		for _, group := range groups {
 			groupByID[group.ID] = group
@@ -84,7 +84,7 @@ func (gm *GroupManager) Initialize() error {
 				g.FailoverStatusCodeMatcher = matcher
 			}
 
-			// Parse header rules with error handling
+			// 带错误处理地解析头部规则
 			if len(group.HeaderRules) > 0 {
 				if err := json.Unmarshal(group.HeaderRules, &g.HeaderRuleList); err != nil {
 					logrus.WithError(err).WithField("group_name", g.Name).Warn("Failed to parse header rules for group")
@@ -94,7 +94,7 @@ func (gm *GroupManager) Initialize() error {
 				g.HeaderRuleList = []models.HeaderRule{}
 			}
 
-			// Parse model redirect rules with error handling
+			// 带错误处理地解析模型重定向规则
 			g.ModelRedirectMap = make(map[string]string)
 			if len(group.ModelRedirectRules) > 0 {
 				hasInvalidRules := false
@@ -116,7 +116,7 @@ func (gm *GroupManager) Initialize() error {
 				}
 			}
 
-			// Load sub-groups for aggregate groups
+			// 加载聚合分组的子分组
 			if g.GroupType == "aggregate" {
 				if subGroups, ok := subGroupsByAggregateID[g.ID]; ok {
 					g.SubGroups = make([]models.GroupSubGroup, len(subGroups))
@@ -161,7 +161,7 @@ func (gm *GroupManager) Initialize() error {
 	return nil
 }
 
-// GetGroupByName retrieves a single group by its name from the cache.
+// GetGroupByName 从缓存中按名称获取单个分组
 func (gm *GroupManager) GetGroupByName(name string) (*models.Group, error) {
 	if gm.syncer == nil {
 		return nil, fmt.Errorf("GroupManager is not initialized")
@@ -175,7 +175,22 @@ func (gm *GroupManager) GetGroupByName(name string) (*models.Group, error) {
 	return group, nil
 }
 
-// Invalidate triggers a cache reload across all instances.
+// GetGroupByID 从缓存中按 ID 获取单个分组
+func (gm *GroupManager) GetGroupByID(id uint) (*models.Group, error) {
+	if gm.syncer == nil {
+		return nil, fmt.Errorf("GroupManager is not initialized")
+	}
+
+	groups := gm.syncer.Get()
+	for _, group := range groups {
+		if group.ID == id {
+			return group, nil
+		}
+	}
+	return nil, gorm.ErrRecordNotFound
+}
+
+// Invalidate 触发所有实例的缓存重新加载
 func (gm *GroupManager) Invalidate() error {
 	if gm.syncer == nil {
 		return fmt.Errorf("GroupManager is not initialized")
@@ -183,7 +198,7 @@ func (gm *GroupManager) Invalidate() error {
 	return gm.syncer.Invalidate()
 }
 
-// Stop gracefully stops the GroupManager's background syncer.
+// Stop 优雅停止 GroupManager 的后台同步器
 func (gm *GroupManager) Stop(ctx context.Context) {
 	if gm.syncer != nil {
 		gm.syncer.Stop()

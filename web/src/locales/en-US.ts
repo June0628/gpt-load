@@ -453,6 +453,8 @@ export default {
       "When enabled, will display aggregated total balance on the group card",
     balanceLastUpdated: "Last Updated",
     balanceQueryFailed: "Query failed",
+    queryBalance: "Query Now",
+    balanceQueryStarted: "Balance query started, please refresh to see results",
     // Key expiration config
     keyExpirationConfig: "Key Expiration Config",
     keyExpirationConfigTooltip:
@@ -640,6 +642,8 @@ export default {
     processing: "Processing task...",
     completed: "Task completed.",
     hideProgress: "Hide progress",
+    clearTask: "Clear stuck task",
+    taskCleared: "Task cleared",
     validatingKeys: "Validating keys for group [{groupName}]",
     importingKeys: "Importing keys to group [{groupName}]",
     deletingKeys: "Deleting keys from group [{groupName}]",

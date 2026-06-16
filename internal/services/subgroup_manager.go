@@ -16,7 +16,7 @@ type SubGroupManager struct {
 	mu        sync.RWMutex
 }
 
-// subGroupItem represents a sub-group with its weight and current weight for round-robin
+// subGroupItem 表示带有权重和当前权重的子分组，用于轮询
 type subGroupItem struct {
 	name          string
 	subGroupID    uint
@@ -24,7 +24,7 @@ type subGroupItem struct {
 	currentWeight int
 }
 
-// NewSubGroupManager creates a new sub-group manager service
+// NewSubGroupManager 创建新的子分组管理服务
 func NewSubGroupManager(store store.Store) *SubGroupManager {
 	return &SubGroupManager{
 		store:     store,
@@ -32,7 +32,7 @@ func NewSubGroupManager(store store.Store) *SubGroupManager {
 	}
 }
 
-// SelectSubGroup selects an appropriate sub-group for the given aggregate group
+// SelectSubGroup 为指定的聚合分组选择合适的子分组
 func (m *SubGroupManager) SelectSubGroup(group *models.Group) (string, error) {
 	if group.GroupType != "aggregate" {
 		return "", nil
@@ -56,7 +56,7 @@ func (m *SubGroupManager) SelectSubGroup(group *models.Group) (string, error) {
 	return selectedName, nil
 }
 
-// RebuildSelectors rebuild all selectors based on the incoming group
+// RebuildSelectors 根据传入的分组重新构建所有选择器
 func (m *SubGroupManager) RebuildSelectors(groups map[string]*models.Group) {
 	newSelectors := make(map[uint]*selector)
 
@@ -75,7 +75,7 @@ func (m *SubGroupManager) RebuildSelectors(groups map[string]*models.Group) {
 	logrus.WithField("new_count", len(newSelectors)).Debug("Rebuilt selectors for aggregate groups")
 }
 
-// getSelector retrieves or creates a selector for the aggregate group
+// getSelector 获取或创建聚合分组的选择器
 func (m *SubGroupManager) getSelector(group *models.Group) *selector {
 	m.mu.RLock()
 	if sel, exists := m.selectors[group.ID]; exists {
@@ -104,7 +104,7 @@ func (m *SubGroupManager) getSelector(group *models.Group) *selector {
 	return sel
 }
 
-// createSelector creates a new selector for an aggregate group
+// createSelector 为聚合分组创建新的选择器
 func (m *SubGroupManager) createSelector(group *models.Group) *selector {
 	if group.GroupType != "aggregate" || len(group.SubGroups) == 0 {
 		return nil
@@ -132,7 +132,7 @@ func (m *SubGroupManager) createSelector(group *models.Group) *selector {
 	}
 }
 
-// selector encapsulates the weighted round-robin algorithm for a single aggregate group
+// selector 封装单个聚合分组的加权轮询算法
 type selector struct {
 	groupID   uint
 	groupName string
@@ -141,7 +141,7 @@ type selector struct {
 	mu        sync.Mutex
 }
 
-// selectNext uses weighted round-robin algorithm to select a sub-group with active keys
+// selectNext 使用加权轮询算法选择有活跃密钥的子分组
 func (s *selector) selectNext() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()

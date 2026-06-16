@@ -4,8 +4,7 @@ import (
 	"strings"
 )
 
-// ignorableErrorSubstrings contains a list of substrings that indicate an error
-// can be safely ignored. These typically occur when a client disconnects prematurely.
+// ignorableErrorSubstrings 包含可安全忽略的错误子字符串列表，这些错误通常发生在客户端提前断开连接时
 var ignorableErrorSubstrings = []string{
 	"context canceled",
 	"connection reset by peer",
@@ -14,9 +13,7 @@ var ignorableErrorSubstrings = []string{
 	"request canceled",
 }
 
-// IsIgnorableError checks if the given error is a common, non-critical error
-// that can occur when a client disconnects. This is used to prevent logging
-// unnecessary errors and to avoid marking keys as failed for client-side issues.
+// IsIgnorableError 检查给定错误是否为客户端断开连接时可能发生的常见非关键错误，用于防止记录不必要的错误和避免将密钥标记为失败
 func IsIgnorableError(err error) bool {
 	if err == nil {
 		return false

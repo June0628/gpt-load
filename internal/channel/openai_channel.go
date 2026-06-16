@@ -35,12 +35,12 @@ func newOpenAIChannel(f *Factory, group *models.Group) (ChannelProxy, error) {
 	}, nil
 }
 
-// ModifyRequest sets the Authorization header for the OpenAI service.
+// ModifyRequest 为OpenAI服务设置Authorization头部
 func (ch *OpenAIChannel) ModifyRequest(req *http.Request, apiKey *models.APIKey, group *models.Group) {
 	req.Header.Set("Authorization", "Bearer "+apiKey.KeyValue)
 }
 
-// IsStreamRequest checks if the request is for a streaming response using the pre-read body.
+// IsStreamRequest 使用预读取的响应体检查请求是否为流式响应
 func (ch *OpenAIChannel) IsStreamRequest(c *gin.Context, bodyBytes []byte) bool {
 	if strings.Contains(c.GetHeader("Accept"), "text/event-stream") {
 		return true
@@ -72,26 +72,26 @@ func (ch *OpenAIChannel) ExtractModel(c *gin.Context, bodyBytes []byte) string {
 	return ""
 }
 
-// ValidateKey checks if the given API key is valid by making a chat completion request.
+// ValidateKey 通过发送聊天补全请求检查给定API密钥是否有效
 func (ch *OpenAIChannel) ValidateKey(ctx context.Context, apiKey *models.APIKey, group *models.Group) (bool, error) {
 	upstreamURL := ch.getUpstreamURL()
 	if upstreamURL == nil {
 		return false, fmt.Errorf("no upstream URL configured for channel %s", ch.Name)
 	}
 
-	// Parse validation endpoint to extract path and query parameters
+	// 解析验证端点以提取路径和查询参数
 	endpointURL, err := url.Parse(ch.ValidationEndpoint)
 	if err != nil {
 		return false, fmt.Errorf("failed to parse validation endpoint: %w", err)
 	}
 
-	// Build final URL with path and query parameters
+	// 使用路径和查询参数构建最终URL
 	finalURL := *upstreamURL
 	finalURL.Path = strings.TrimRight(finalURL.Path, "/") + endpointURL.Path
 	finalURL.RawQuery = endpointURL.RawQuery
 	reqURL := finalURL.String()
 
-	// Use a minimal, low-cost payload for validation
+	// 使用最小、低成本的载荷进行验证
 	payload := gin.H{
 		"model": ch.TestModel,
 		"messages": []gin.H{
@@ -110,7 +110,7 @@ func (ch *OpenAIChannel) ValidateKey(ctx context.Context, apiKey *models.APIKey,
 	req.Header.Set("Authorization", "Bearer "+apiKey.KeyValue)
 	req.Header.Set("Content-Type", "application/json")
 
-	// Apply custom header rules if available
+	// 应用自定义header规则（如果有）
 	if len(group.HeaderRuleList) > 0 {
 		headerCtx := utils.NewHeaderVariableContext(group, apiKey)
 		utils.ApplyHeaderRules(req, group.HeaderRuleList, headerCtx)
@@ -122,18 +122,18 @@ func (ch *OpenAIChannel) ValidateKey(ctx context.Context, apiKey *models.APIKey,
 	}
 	defer resp.Body.Close()
 
-	// Any 2xx status code indicates the key is valid.
+	// 任何2xx状态码表示密钥有效
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		return true, nil
 	}
 
-	// For non-200 responses, parse the body to provide a more specific error reason.
+	// 对于非200响应，解析响应体以提供更具体的错误原因
 	errorBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return false, fmt.Errorf("key is invalid (status %d), but failed to read error body: %w", resp.StatusCode, err)
 	}
 
-	// Use the new parser to extract a clean error message.
+	// 使用新解析器提取干净的错误信息
 	parsedError := app_errors.ParseUpstreamError(errorBody)
 
 	return false, fmt.Errorf("[status %d] %s", resp.StatusCode, parsedError)

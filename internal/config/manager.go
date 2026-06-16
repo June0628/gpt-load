@@ -1,4 +1,4 @@
-// Package config provides configuration management for the application
+// Package config 提供应用的配置管理
 package config
 
 import (
@@ -15,7 +15,7 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// Constants represents configuration constants
+// Constants 表示配置常量
 type Constants struct {
 	MinPort               int
 	MaxPort               int
@@ -25,7 +25,7 @@ type Constants struct {
 	DefaultMaxFreeSockets int
 }
 
-// DefaultConstants holds default configuration values
+// DefaultConstants 存储默认配置值
 var DefaultConstants = Constants{
 	MinPort:               1,
 	MaxPort:               65535,
@@ -35,14 +35,14 @@ var DefaultConstants = Constants{
 	DefaultMaxFreeSockets: 10,
 }
 
-// Manager implements the ConfigManager interface
+// Manager 实现 ConfigManager 接口
 type Manager struct {
 	config          *Config
 	settingsManager *SystemSettingsManager
 	mu              sync.RWMutex
 }
 
-// Config represents the application configuration
+// Config 表示应用配置
 type Config struct {
 	Server        types.ServerConfig
 	Auth          types.AuthConfig
@@ -54,7 +54,7 @@ type Config struct {
 	EncryptionKey string
 }
 
-// NewManager creates a new configuration manager
+// NewManager 创建新的配置管理器
 func NewManager(settingsManager *SystemSettingsManager) (types.ConfigManager, error) {
 	manager := &Manager{
 		settingsManager: settingsManager,
@@ -65,7 +65,7 @@ func NewManager(settingsManager *SystemSettingsManager) (types.ConfigManager, er
 	return manager, nil
 }
 
-// ReloadConfig reloads the configuration from environment variables
+// ReloadConfig 从环境变量重新加载配置
 func (m *Manager) ReloadConfig() error {
 	if err := godotenv.Load(); err != nil {
 		logrus.Info("Info: Create .env file to support environment variable configuration")
@@ -110,7 +110,7 @@ func (m *Manager) ReloadConfig() error {
 	m.config = config
 	m.mu.Unlock()
 
-	// Validate configuration
+	// 验证配置
 	if err := m.Validate(); err != nil {
 		return err
 	}
@@ -118,77 +118,77 @@ func (m *Manager) ReloadConfig() error {
 	return nil
 }
 
-// IsMaster returns Server mode
+// IsMaster 返回服务器模式
 func (m *Manager) IsMaster() bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.config.Server.IsMaster
 }
 
-// GetAuthConfig returns authentication configuration
+// GetAuthConfig 返回认证配置
 func (m *Manager) GetAuthConfig() types.AuthConfig {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.config.Auth
 }
 
-// GetCORSConfig returns CORS configuration
+// GetCORSConfig 返回 CORS 配置
 func (m *Manager) GetCORSConfig() types.CORSConfig {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.config.CORS
 }
 
-// GetPerformanceConfig returns performance configuration
+// GetPerformanceConfig 返回性能配置
 func (m *Manager) GetPerformanceConfig() types.PerformanceConfig {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.config.Performance
 }
 
-// GetLogConfig returns logging configuration
+// GetLogConfig 返回日志配置
 func (m *Manager) GetLogConfig() types.LogConfig {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.config.Log
 }
 
-// GetRedisDSN returns the Redis DSN string.
+// GetRedisDSN 返回 Redis DSN 字符串
 func (m *Manager) GetRedisDSN() string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.config.RedisDSN
 }
 
-// GetDatabaseConfig returns the database configuration.
+// GetDatabaseConfig 返回数据库配置
 func (m *Manager) GetDatabaseConfig() types.DatabaseConfig {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.config.Database
 }
 
-// GetEncryptionKey returns the encryption key.
+// GetEncryptionKey 返回加密密钥
 func (m *Manager) GetEncryptionKey() string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.config.EncryptionKey
 }
 
-// GetEffectiveServerConfig returns server configuration merged with system settings
+// GetEffectiveServerConfig 返回合并系统设置后的服务器配置
 func (m *Manager) GetEffectiveServerConfig() types.ServerConfig {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.config.Server
 }
 
-// Validate validates the configuration
+// Validate 验证配置
 func (m *Manager) Validate() error {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	var validationErrors []string
 
-	// Validate port
+	// 验证端口
 	if m.config.Server.Port < DefaultConstants.MinPort || m.config.Server.Port > DefaultConstants.MaxPort {
 		validationErrors = append(validationErrors, fmt.Sprintf("port must be between %d-%d", DefaultConstants.MinPort, DefaultConstants.MaxPort))
 	}
@@ -197,14 +197,14 @@ func (m *Manager) Validate() error {
 		validationErrors = append(validationErrors, "max concurrent requests cannot be less than 1")
 	}
 
-	// Validate auth key
+	// 验证认证密钥
 	if m.config.Auth.Key == "" {
 		validationErrors = append(validationErrors, "AUTH_KEY is required and cannot be empty")
 	} else {
 		utils.ValidatePasswordStrength(m.config.Auth.Key, "AUTH_KEY")
 	}
 
-	// Validate GracefulShutdownTimeout and reset if necessary
+	// 验证优雅关闭超时时间，必要时重置
 	if m.config.Server.GracefulShutdownTimeout < 10 {
 		logrus.Warnf("SERVER_GRACEFUL_SHUTDOWN_TIMEOUT value %ds is too short, resetting to minimum 10s.", m.config.Server.GracefulShutdownTimeout)
 		m.config.Server.GracefulShutdownTimeout = 10
@@ -229,7 +229,7 @@ func (m *Manager) Validate() error {
 	return nil
 }
 
-// DisplayServerConfig displays current server-related configuration information
+// DisplayServerConfig 显示当前服务器相关配置信息
 func (m *Manager) DisplayServerConfig() {
 	serverConfig := m.GetEffectiveServerConfig()
 	corsConfig := m.GetCORSConfig()

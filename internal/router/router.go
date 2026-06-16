@@ -118,6 +118,7 @@ func registerProtectedAPIRoutes(api *gin.RouterGroup, serverHandler *handler.Ser
 		groups.DELETE("/:id", serverHandler.DeleteGroup)
 		groups.GET("/:id/stats", serverHandler.GetGroupStats)
 		groups.POST("/:id/copy", serverHandler.CopyGroup)
+		groups.POST("/:id/query-balance", serverHandler.QueryBalance)
 
 		groups.GET("/:id/sub-groups", serverHandler.GetSubGroups)
 		groups.POST("/:id/sub-groups", serverHandler.AddSubGroups)
@@ -146,6 +147,7 @@ func registerProtectedAPIRoutes(api *gin.RouterGroup, serverHandler *handler.Ser
 
 	// Tasks
 	api.GET("/tasks/status", serverHandler.GetTaskStatus)
+	api.POST("/tasks/clear", serverHandler.ClearTask)
 
 	// 仪表板和日志
 	dashboard := api.Group("/dashboard")

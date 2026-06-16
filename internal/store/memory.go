@@ -7,13 +7,13 @@ import (
 	"time"
 )
 
-// memoryStoreItem holds the value and expiration timestamp for a key.
+// memoryStoreItem 存储键的值和过期时间戳
 type memoryStoreItem struct {
 	value     []byte
-	expiresAt int64 // Unix-nano timestamp. 0 for no expiry.
+	expiresAt int64 // Unix 纳秒时间戳，0 表示永不过期
 }
 
-// MemoryStore is an in-memory key-value store that is safe for concurrent use.
+// MemoryStore 是线程安全的内存键值存储
 type MemoryStore struct {
 	mu            sync.RWMutex
 	data          map[string]any
@@ -22,7 +22,7 @@ type MemoryStore struct {
 	stopCleanup   chan struct{}
 }
 
-// NewMemoryStore creates and returns a new MemoryStore instance.
+// NewMemoryStore 创建并返回新的 MemoryStore 实例
 func NewMemoryStore() *MemoryStore {
 	s := &MemoryStore{
 		data:        make(map[string]any),
@@ -61,13 +61,13 @@ func (s *MemoryStore) deleteExpired() {
 	}
 }
 
-// Close cleans up resources.
+// Close 释放资源
 func (s *MemoryStore) Close() error {
 	close(s.stopCleanup)
 	return nil
 }
 
-// Set stores a key-value pair.
+// Set 存储键值对
 func (s *MemoryStore) Set(key string, value []byte, ttl time.Duration) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -84,7 +84,7 @@ func (s *MemoryStore) Set(key string, value []byte, ttl time.Duration) error {
 	return nil
 }
 
-// Get retrieves a value by its key.
+// Get 根据键检索值
 func (s *MemoryStore) Get(key string) ([]byte, error) {
 	s.mu.RLock()
 	rawItem, exists := s.data[key]
@@ -109,7 +109,7 @@ func (s *MemoryStore) Get(key string) ([]byte, error) {
 	return item.value, nil
 }
 
-// Delete removes a value by its key.
+// Delete 根据键删除值
 func (s *MemoryStore) Delete(key string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -117,7 +117,7 @@ func (s *MemoryStore) Delete(key string) error {
 	return nil
 }
 
-// Del removes multiple values by their keys.
+// Del 根据多个键删除值
 func (s *MemoryStore) Del(keys ...string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -127,7 +127,7 @@ func (s *MemoryStore) Del(keys ...string) error {
 	return nil
 }
 
-// Exists checks if a key exists.
+// Exists 检查键是否存在
 func (s *MemoryStore) Exists(key string) (bool, error) {
 	s.mu.RLock()
 	rawItem, exists := s.data[key]
@@ -149,7 +149,7 @@ func (s *MemoryStore) Exists(key string) (bool, error) {
 	return true, nil
 }
 
-// SetNX sets a key-value pair if the key does not already exist.
+// SetNX 在键不存在时设置键值对
 func (s *MemoryStore) SetNX(key string, value []byte, ttl time.Duration) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -161,12 +161,12 @@ func (s *MemoryStore) SetNX(key string, value []byte, ttl time.Duration) (bool, 
 				return false, nil
 			}
 		} else {
-			// Key exists but is not a simple K/V item, treat as existing
+			// 键存在但不是简单的 K/V 项，视为已存在
 			return false, nil
 		}
 	}
 
-	// Key does not exist or is expired, so we can set it.
+	// 键不存在或已过期，可以设置
 	var expiresAt int64
 	if ttl > 0 {
 		expiresAt = time.Now().UnixNano() + ttl.Nanoseconds()
@@ -178,7 +178,7 @@ func (s *MemoryStore) SetNX(key string, value []byte, ttl time.Duration) (bool, 
 	return true, nil
 }
 
-// --- HASH operations ---
+// --- HASH 操作 ---
 
 func (s *MemoryStore) HSet(key string, values map[string]any) error {
 	s.mu.Lock()
@@ -249,7 +249,7 @@ func (s *MemoryStore) HIncrBy(key, field string, incr int64) (int64, error) {
 	return newVal, nil
 }
 
-// --- LIST operations ---
+// --- LIST 操作 ---
 
 func (s *MemoryStore) LPush(key string, values ...any) error {
 	s.mu.Lock()
@@ -272,7 +272,7 @@ func (s *MemoryStore) LPush(key string, values ...any) error {
 		strValues[i] = fmt.Sprint(v)
 	}
 
-	s.data[key] = append(strValues, list...) // Prepend
+	s.data[key] = append(strValues, list...) // 前插
 	return nil
 }
 
@@ -334,7 +334,7 @@ func (s *MemoryStore) Rotate(key string) (string, error) {
 	return item, nil
 }
 
-// LLen returns the length of a list.
+// LLen 返回列表的长度
 func (s *MemoryStore) LLen(key string) (int64, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -352,9 +352,9 @@ func (s *MemoryStore) LLen(key string) (int64, error) {
 	return int64(len(list)), nil
 }
 
-// --- SET operations ---
+// --- SET 操作 ---
 
-// SAdd adds members to a set.
+// SAdd 向集合添加成员
 func (s *MemoryStore) SAdd(key string, members ...any) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -378,7 +378,7 @@ func (s *MemoryStore) SAdd(key string, members ...any) error {
 	return nil
 }
 
-// SPopN randomly removes and returns the given number of members from a set.
+// SPopN 从集合中随机移除并返回指定数量的成员
 func (s *MemoryStore) SPopN(key string, count int64) ([]string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -409,21 +409,21 @@ func (s *MemoryStore) SPopN(key string, count int64) ([]string, error) {
 	return popped, nil
 }
 
-// --- Pub/Sub operations ---
+// --- Pub/Sub 操作 ---
 
-// memorySubscription implements the Subscription interface for the in-memory store.
+// memorySubscription 实现内存存储的 Subscription 接口
 type memorySubscription struct {
 	store   *MemoryStore
 	channel string
 	msgChan chan *Message
 }
 
-// Channel returns the message channel for the subscription.
+// Channel 返回订阅的消息通道
 func (ms *memorySubscription) Channel() <-chan *Message {
 	return ms.msgChan
 }
 
-// Close removes the subscription from the store.
+// Close 从存储中移除订阅
 func (ms *memorySubscription) Close() error {
 	ms.store.muSubscribers.Lock()
 	defer ms.store.muSubscribers.Unlock()
@@ -438,7 +438,7 @@ func (ms *memorySubscription) Close() error {
 	return nil
 }
 
-// Publish sends a message to all subscribers of a channel.
+// Publish 向通道的所有订阅者发送消息
 func (s *MemoryStore) Publish(channel string, message []byte) error {
 	s.muSubscribers.RLock()
 	defer s.muSubscribers.RUnlock()
@@ -461,12 +461,12 @@ func (s *MemoryStore) Publish(channel string, message []byte) error {
 	return nil
 }
 
-// Subscribe listens for messages on a given channel.
+// Subscribe 监听指定通道的消息
 func (s *MemoryStore) Subscribe(channel string) (Subscription, error) {
 	s.muSubscribers.Lock()
 	defer s.muSubscribers.Unlock()
 
-	msgChan := make(chan *Message, 10) // Buffered channel
+	msgChan := make(chan *Message, 10) // 带缓冲的通道
 
 	if _, ok := s.subscribers[channel]; !ok {
 		s.subscribers[channel] = make(map[chan *Message]struct{})
@@ -482,12 +482,12 @@ func (s *MemoryStore) Subscribe(channel string) (Subscription, error) {
 	return sub, nil
 }
 
-// Clear clears all data.
+// Clear 清除所有数据
 func (s *MemoryStore) Clear() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Clear all data
+	// 清除所有数据
 	s.data = make(map[string]any)
 
 	return nil

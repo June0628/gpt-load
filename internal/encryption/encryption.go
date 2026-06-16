@@ -12,7 +12,7 @@ import (
 	"io"
 )
 
-// Service defines the encryption interface
+// Service 定义加密接口
 type Service interface {
 	Encrypt(plaintext string) (string, error)
 	Decrypt(ciphertext string) (string, error)
@@ -20,17 +20,17 @@ type Service interface {
 	Hash(plaintext string) string
 }
 
-// NewService creates encryption service
+// NewService 创建加密服务
 func NewService(encryptionKey string) (Service, error) {
 	if encryptionKey == "" {
 		return &noopService{}, nil
 	}
 
-	// Derive AES-256 key from user input and validate strength
+	// 从用户输入派生 AES-256 密钥并验证强度
 	aesKey := utils.DeriveAESKey(encryptionKey)
 	utils.ValidatePasswordStrength(encryptionKey, "ENCRYPTION_KEY")
 
-	// Initialize cipher and GCM once for reuse
+	// 初始化 cipher 和 GCM 以供复用
 	block, err := aes.NewCipher(aesKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create cipher: %w", err)
@@ -44,7 +44,7 @@ func NewService(encryptionKey string) (Service, error) {
 	return &aesService{key: aesKey, gcm: gcm}, nil
 }
 
-// aesService implements AES-256-GCM encryption
+// aesService 实现 AES-256-GCM 加密
 type aesService struct {
 	key []byte
 	gcm cipher.AEAD
@@ -60,7 +60,7 @@ func (s *aesService) Encrypt(plaintext string) (string, error) {
 	return hex.EncodeToString(ciphertext), nil
 }
 
-// Decrypt decrypts a single ciphertext string
+// Decrypt 解密单个密文字符串
 func (s *aesService) Decrypt(ciphertext string) (string, error) {
 	if ciphertext == "" {
 		return "", nil
@@ -85,10 +85,10 @@ func (s *aesService) Decrypt(ciphertext string) (string, error) {
 	return string(plaintext), nil
 }
 
-// BatchDecrypt decrypts multiple ciphertexts efficiently
-// Returns a map of ciphertext -> plaintext, skipping empty strings and duplicates
+// BatchDecrypt 批量解密多个密文
+// 返回密文到明文的映射，跳过空字符串和重复项
 func (s *aesService) BatchDecrypt(ciphertexts []string) map[string]string {
-	// Deduplicate inputs
+	// 去重输入
 	seen := make(map[string]struct{}, len(ciphertexts))
 	var uniqueCiphertexts []string
 	for _, ct := range ciphertexts {
@@ -114,7 +114,7 @@ func (s *aesService) BatchDecrypt(ciphertexts []string) map[string]string {
 	return results
 }
 
-// Hash generates a hash of the plaintext using HMAC-SHA256.
+// Hash 使用 HMAC-SHA256 生成明文的哈希值。
 // 警告：此 hash 依赖 encryption key。切换加密模式（如从 noop 切换到 aes 或更换 key）
 // 会导致所有现有 key_hash 失效。如需切换加密模式，必须手动重新计算所有 key 的 hash。
 func (s *aesService) Hash(plaintext string) string {
@@ -126,7 +126,7 @@ func (s *aesService) Hash(plaintext string) string {
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
-// noopService disables encryption
+// noopService 禁用加密的空实现
 type noopService struct{}
 
 func (s *noopService) Encrypt(plaintext string) (string, error) {
@@ -137,7 +137,7 @@ func (s *noopService) Decrypt(ciphertext string) (string, error) {
 	return ciphertext, nil
 }
 
-// BatchDecrypt for noopService - returns identity map for unique inputs
+// BatchDecrypt 空服务的批量解密 - 返回输入的恒等映射
 func (s *noopService) BatchDecrypt(ciphertexts []string) map[string]string {
 	seen := make(map[string]struct{}, len(ciphertexts))
 	results := make(map[string]string, len(ciphertexts))
@@ -153,7 +153,7 @@ func (s *noopService) BatchDecrypt(ciphertexts []string) map[string]string {
 	return results
 }
 
-// Hash generates a hash of the plaintext using SHA256 (no key)
+// Hash 使用 SHA256 生成明文的哈希值（无需密钥）
 func (s *noopService) Hash(plaintext string) string {
 	if plaintext == "" {
 		return ""

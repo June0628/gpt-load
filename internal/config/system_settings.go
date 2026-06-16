@@ -28,7 +28,7 @@ type SystemSettingsManager struct {
 	syncer *syncer.CacheSyncer[types.SystemSettings]
 }
 
-// NewSystemSettingsManager creates a new, uninitialized SystemSettingsManager.
+// NewSystemSettingsManager 创建新的未初始化的 SystemSettingsManager
 func NewSystemSettingsManager() *SystemSettingsManager {
 	return &SystemSettingsManager{}
 }
@@ -46,7 +46,7 @@ type groupManager interface {
 	Invalidate() error
 }
 
-// Initialize initializes the SystemSettingsManager with database and store dependencies.
+// Initialize 使用数据库和存储依赖初始化 SystemSettingsManager
 func (sm *SystemSettingsManager) Initialize(store store.Store, gm groupManager, isMaster bool) error {
 	settingsLoader := func() (types.SystemSettings, error) {
 		var dbSettings []models.SystemSetting
@@ -59,7 +59,7 @@ func (sm *SystemSettingsManager) Initialize(store store.Store, gm groupManager, 
 			settingsMap[setting.SettingKey] = setting.SettingValue
 		}
 
-		// Start with default settings, then override with values from the database.
+		// 从默认设置开始，然后用数据库中的值覆盖
 		settings := utils.DefaultSystemSettings()
 		v := reflect.ValueOf(&settings).Elem()
 		t := v.Type()
@@ -112,14 +112,14 @@ func (sm *SystemSettingsManager) Initialize(store store.Store, gm groupManager, 
 	return nil
 }
 
-// Stop gracefully stops the SystemSettingsManager's background syncer.
+// Stop 优雅停止 SystemSettingsManager 的后台同步器
 func (sm *SystemSettingsManager) Stop(ctx context.Context) {
 	if sm.syncer != nil {
 		sm.syncer.Stop()
 	}
 }
 
-// EnsureSettingsInitialized 确保数据库中存在所有系统设置的记录。
+// EnsureSettingsInitialized 确保数据库中存在所有系统设置的记录
 func (sm *SystemSettingsManager) EnsureSettingsInitialized(authConfig types.AuthConfig) error {
 	defaultSettings := utils.DefaultSystemSettings()
 	metadata := utils.GenerateSettingsMetadata(&defaultSettings)
@@ -170,7 +170,7 @@ func (sm *SystemSettingsManager) GetSettings() types.SystemSettings {
 	return sm.syncer.Get()
 }
 
-// GetAppUrl returns the effective App URL.
+// GetAppUrl 返回有效的应用 URL
 func (sm *SystemSettingsManager) GetAppUrl() string {
 	settings := sm.GetSettings()
 	if settings.AppUrl != "" {
@@ -200,7 +200,7 @@ func (sm *SystemSettingsManager) UpdateSettings(settingsMap map[string]any) erro
 	for key, value := range settingsMap {
 		settingsToUpdate = append(settingsToUpdate, models.SystemSetting{
 			SettingKey:   key,
-			SettingValue: fmt.Sprintf("%v", value), // Convert any to string
+			SettingValue: fmt.Sprintf("%v", value), // 将 any 转换为字符串
 		})
 	}
 
@@ -217,7 +217,7 @@ func (sm *SystemSettingsManager) UpdateSettings(settingsMap map[string]any) erro
 	return sm.syncer.Invalidate()
 }
 
-// GetEffectiveConfig 获取有效配置 (系统配置 + 分组覆盖)
+// GetEffectiveConfig 获取有效配置（系统配置 + 分组覆盖）
 func (sm *SystemSettingsManager) GetEffectiveConfig(groupConfigJSON datatypes.JSONMap) types.SystemSettings {
 	effectiveConfig := sm.GetSettings()
 
@@ -289,7 +289,7 @@ func (sm *SystemSettingsManager) ValidateSettings(settingsMap map[string]any) er
 				return fmt.Errorf("invalid value for %s: must be an integer", key)
 			}
 
-			// The 'required' check is implicitly handled by the type assertion above.
+			// 'required' 检查已由上面的类型断言隐式处理
 			for _, rule := range rules {
 				trimmedRule := strings.TrimSpace(rule)
 				if strings.HasPrefix(trimmedRule, "min=") {
@@ -328,7 +328,7 @@ func (sm *SystemSettingsManager) ValidateSettings(settingsMap map[string]any) er
 	return nil
 }
 
-// ValidateGroupConfigOverrides validates a map of group-level configuration overrides.
+// ValidateGroupConfigOverrides 验证分组级配置覆盖映射
 func (sm *SystemSettingsManager) ValidateGroupConfigOverrides(configMap map[string]any) error {
 	tempSettings := types.SystemSettings{}
 	v := reflect.ValueOf(&tempSettings).Elem()
@@ -366,7 +366,7 @@ func (sm *SystemSettingsManager) ValidateGroupConfigOverrides(configMap map[stri
 				return fmt.Errorf("invalid value for %s: must be an integer", key)
 			}
 
-			// The 'required' check is implicitly handled by the type assertion above.
+			// 'required' 检查已由上面的类型断言隐式处理
 			for _, rule := range rules {
 				trimmedRule := strings.TrimSpace(rule)
 				if strings.HasPrefix(trimmedRule, "min=") {
@@ -399,14 +399,14 @@ func (sm *SystemSettingsManager) ValidateGroupConfigOverrides(configMap map[stri
 				return fmt.Errorf("invalid type for %s: expected boolean, got %T", key, value)
 			}
 		default:
-			// Do not validate other types for group overrides
+			// 不验证分组覆盖的其他类型
 		}
 	}
 
 	return nil
 }
 
-// DisplaySystemConfig displays the current system settings.
+// DisplaySystemConfig 显示当前系统设置
 func (sm *SystemSettingsManager) DisplaySystemConfig(settings types.SystemSettings) {
 	logrus.Info("")
 	logrus.Info("========= System Settings =========")
