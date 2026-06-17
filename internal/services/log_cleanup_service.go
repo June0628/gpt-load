@@ -102,6 +102,12 @@ func (s *LogCleanupService) cleanupExpiredLogs() {
 	// 检查是否需要在删除前上传
 	needUploadBeforeDelete := settings.LogUploadEnabled && settings.LogUploadBeforeDelete
 
+	// 语义陷阱提醒：用户开启了 LogUploadEnabled 但未开启 LogUploadBeforeDelete，
+	// 此时过期日志表将被直接删除而不上传，存在数据丢失风险。
+	if settings.LogUploadEnabled && !settings.LogUploadBeforeDelete {
+		logrus.Warn("LogUploadEnabled=true 但 LogUploadBeforeDelete=false，过期日志表将被直接删除而不上传备份（如需备份请同时启用 LogUploadBeforeDelete）")
+	}
+
 	var failedTables []string
 	var failedErrors []string
 
@@ -130,7 +136,7 @@ func (s *LogCleanupService) cleanupExpiredLogs() {
 		// 删除表
 		var dropErr error
 		if dialect == "mysql" {
-			dropErr = s.db.Exec(fmt.Sprintf("DROP TABLE IF EXISTS %s", tableName)).Error
+			dropErr = s.db.Exec(fmt.Sprintf("DROP TABLE IF EXISTS `%s`", tableName)).Error
 		} else {
 			// SQLite
 			dropErr = s.db.Exec(fmt.Sprintf("DROP TABLE IF EXISTS \"%s\"", tableName)).Error

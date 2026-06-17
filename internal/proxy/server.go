@@ -128,8 +128,28 @@ func (ps *ProxyServer) executeRequestWithRetry(
 	cfg := group.EffectiveConfig
 	maxRetries := cfg.MaxRetries
 
+	// 获取模型名称（用于魔塔平台模型维度限流）
+	modelName := ""
+	if channelHandler != nil {
+		modelName = channelHandler.ExtractModel(c, bodyBytes)
+	}
+
 	for retryCount := 0; retryCount <= maxRetries; retryCount++ {
-		apiKey, err := ps.keyProvider.SelectKey(group.ID)
+		// 先构建上游 URL，用于判断是否魔塔平台
+		upstreamURL, err := channelHandler.BuildUpstreamURL(c.Request.URL, originalGroup.Name)
+		if err != nil {
+			response.Error(c, app_errors.NewAPIError(app_errors.ErrInternalServer, fmt.Sprintf("Failed to build upstream URL: %v", err)))
+			return
+		}
+
+		// 选择密钥：魔塔平台需要检查模型维度限流
+		var apiKey *models.APIKey
+		if keypool.IsModelScopeUpstream(upstreamURL) && modelName != "" {
+			apiKey, err = ps.keyProvider.SelectKeyWithModelCheck(group.ID, upstreamURL, modelName, maxRetries)
+		} else {
+			apiKey, err = ps.keyProvider.SelectKey(group.ID)
+		}
+
 		if err != nil {
 			logrus.Errorf("Failed to select a key for group %s on attempt %d: %v", group.Name, retryCount+1, err)
 			response.Error(c, app_errors.NewAPIError(app_errors.ErrNoKeysAvailable, err.Error()))
@@ -146,12 +166,6 @@ func (ps *ProxyServer) executeRequestWithRetry(
 			logrus.Errorf("All keys in group %s have reached daily request limit", group.Name)
 			response.Error(c, app_errors.NewAPIError(app_errors.ErrNoKeysAvailable, "所有密钥已达到每日请求限制"))
 			ps.logRequest(c, originalGroup, group, nil, startTime, http.StatusServiceUnavailable, errors.New("daily request limit reached"), isStream, "", channelHandler, bodyBytes, models.RequestTypeFinal)
-			return
-		}
-
-		upstreamURL, err := channelHandler.BuildUpstreamURL(c.Request.URL, originalGroup.Name)
-		if err != nil {
-			response.Error(c, app_errors.NewAPIError(app_errors.ErrInternalServer, fmt.Sprintf("Failed to build upstream URL: %v", err)))
 			return
 		}
 
@@ -266,8 +280,15 @@ func (ps *ProxyServer) executeRequestWithRetry(
 				logrus.Debugf("Request failed with status %d (attempt %d/%d) for key %s. Parsed Error: %s", statusCode, retryCount+1, maxRetries+1, utils.MaskAPIKey(apiKey.KeyValue), parsedError)
 			}
 
-			// 使用解析后的错误信息更新密钥状态
-			ps.keyProvider.UpdateStatus(apiKey, group, false, parsedError)
+			// 魔塔平台 429（模型维度限流）不触发密钥故障计数，由 limiter 单独管理
+			if keypool.IsModelScopeUpstream(upstreamURL) && statusCode == http.StatusTooManyRequests {
+				logrus.WithFields(logrus.Fields{
+					"keyID": apiKey.ID,
+					"model": modelName,
+				}).Debug("ModelScope 429 rate limit, skipping key failure count")
+			} else {
+				ps.keyProvider.UpdateStatus(apiKey, group, false, parsedError)
+			}
 
 			// 判断是否为最后一次尝试
 			isLastAttempt := retryCount >= maxRetries
@@ -302,6 +323,13 @@ func (ps *ProxyServer) executeRequestWithRetry(
 
 		// 增加每日请求计数
 		ps.keyProvider.IncrementDailyRequestCount(apiKey, group)
+
+		// 魔塔平台：从响应头更新模型维度剩余次数
+		if keypool.IsModelScopeUpstream(upstreamURL) && modelName != "" {
+			if remaining := resp.Header.Get(keypool.ModelScopeHeaderRemaining); remaining != "" {
+				ps.keyProvider.UpdateModelScopeRemaining(apiKey, modelName, remaining)
+			}
+		}
 
 		// 检查是否为模型列表请求（需要特殊处理）
 		if shouldInterceptModelList(c.Request.URL.Path, c.Request.Method) {

@@ -408,7 +408,16 @@ func (s *KeyService) QueryGroupBalances(group *models.Group) {
 	successCount := 0
 	for i := range activeKeys {
 		key := &activeKeys[i]
-		balanceInfo, err := balanceService.QueryBalance(context.Background(), group, key)
+		// 解密密钥值，因为数据库中的 KeyValue 是加密存储的
+		decryptedKey, decryptErr := s.EncryptionSvc.Decrypt(key.KeyValue)
+		if decryptErr != nil {
+			logrus.WithError(decryptErr).WithField("key_id", key.ID).Warn("解密密钥失败，跳过余额查询")
+			continue
+		}
+		// 创建临时密钥对象，使用解密后的值
+		queryKey := *key
+		queryKey.KeyValue = decryptedKey
+		balanceInfo, err := balanceService.QueryBalance(context.Background(), group, &queryKey)
 		if err != nil {
 			logrus.WithError(err).WithField("key_id", key.ID).Debug("余额查询失败")
 			continue
@@ -421,6 +430,11 @@ func (s *KeyService) QueryGroupBalances(group *models.Group) {
 				"key_id":  key.ID,
 				"balance": balanceInfo.BalanceTotal,
 			}).Debug("余额查询成功")
+		} else if balanceInfo != nil {
+			logrus.WithFields(logrus.Fields{
+				"key_id": key.ID,
+				"error":  balanceInfo.ErrorMessage,
+			}).Warn("余额查询返回失败")
 		}
 	}
 

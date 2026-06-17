@@ -102,9 +102,15 @@ func (s *Server) GetLogTables(c *gin.Context) {
 		var results []struct {
 			TableName string `gorm:"column:TABLE_NAME"`
 		}
-		dbName := ""
-		db.DB.Raw("SELECT DATABASE()").Scan(&dbName)
-		db.DB.Raw("SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_NAME LIKE 'request_logs_%'", dbName).Scan(&results)
+		var dbName string
+		if err := db.DB.Raw("SELECT DATABASE()").Scan(&dbName).Error; err != nil {
+			response.Error(c, app_errors.NewAPIError(app_errors.ErrDatabase, "查询当前数据库名失败: "+err.Error()))
+			return
+		}
+		if err := db.DB.Raw("SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_NAME LIKE 'request_logs_%'", dbName).Scan(&results).Error; err != nil {
+			response.Error(c, app_errors.NewAPIError(app_errors.ErrDatabase, "查询日志表列表失败: "+err.Error()))
+			return
+		}
 		for _, r := range results {
 			allTables = append(allTables, r.TableName)
 		}
@@ -112,7 +118,10 @@ func (s *Server) GetLogTables(c *gin.Context) {
 		var results []struct {
 			Name string `gorm:"column:name"`
 		}
-		db.DB.Raw("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'request_logs_%'").Scan(&results)
+		if err := db.DB.Raw("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'request_logs_%'").Scan(&results).Error; err != nil {
+			response.Error(c, app_errors.NewAPIError(app_errors.ErrDatabase, "查询日志表列表失败: "+err.Error()))
+			return
+		}
 		for _, r := range results {
 			allTables = append(allTables, r.Name)
 		}

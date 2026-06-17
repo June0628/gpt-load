@@ -223,3 +223,7 @@ gpt-load
 
 # 前端编译产物
 web/dist/
+
+# 开发产物
+.mimocode/
+amp

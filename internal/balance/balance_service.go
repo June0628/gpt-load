@@ -47,9 +47,12 @@ type PlatformBalanceHandler func(ctx context.Context, baseURL string, apiKey str
 // platformHandlers 注册各平台的余额查询处理器
 var platformHandlers = map[string]PlatformBalanceHandler{
 	"default":               handleDefaultBalance,        // 默认处理器（尝试标准 OpenAI 格式）
-	"openai":                handleOpenAIBalance,         // OpenAI
-	"api.siliconflow.cn":    handleSiliconFlowBalance,    // 硅基流动
-	"api.chatanywhere.org":  handleChatAnywhereBalance,   // ChatAnywhere（特殊处理）
+	"api.openai.com":        handleOpenAIBalance,         // OpenAI（使用真实 host 匹配）
+	"api.siliconflow.cn":    handleSiliconFlowBalance,    // 硅基流动（国内站）
+	"api.siliconflow.com":   handleSiliconFlowBalance,    // 硅基流动（国际站）
+	"api.chatanywhere.org":   handleChatAnywhereBalance,   // ChatAnywhere（特殊处理）
+	"api.chatanywhere.tech":  handleChatAnywhereBalance,   // ChatAnywhere（tech 域名）
+	"api.chatanywhere.com.cn": handleChatAnywhereBalance,  // ChatAnywhere（国内站）
 	"api.deepseek.com":      handleDeepSeekBalance,       // DeepSeek
 	"api.moonshot.cn":       handleMoonshotBalance,       // 月之暗面
 	"api.baichuan-ai.com":   handleBaichuanBalance,       // 百川智能
@@ -177,21 +180,40 @@ func handleDefaultBalance(ctx context.Context, baseURL string, apiKey string, cu
 	}
 
 	// 尝试解析标准 OpenAI 格式
+	// 当同时存在 total_grants 和 total_used 时，BalanceTotal = total - used（剩余可用）
+	var totalGrants, totalUsed float64
+	hasTotalGrants := false
+	hasTotalUsed := false
+
+	if total, ok := result["total_grants"].(float64); ok {
+		totalGrants = total
+		hasTotalGrants = true
+	}
+	if used, ok := result["total_used"].(float64); ok {
+		totalUsed = used
+		hasTotalUsed = true
+	}
+
 	balanceTotal := "N/A"
 	balanceUsed := "N/A"
 
-	if total, ok := result["total_grants"].(float64); ok {
-		balanceTotal = fmt.Sprintf("%.2f", total)
+	if hasTotalGrants && hasTotalUsed {
+		// 用总额减去已用，得到剩余可用余额
+		balanceTotal = fmt.Sprintf("%.2f", totalGrants-totalUsed)
+		balanceUsed = fmt.Sprintf("%.2f", totalUsed)
+	} else if hasTotalGrants {
+		balanceTotal = fmt.Sprintf("%.2f", totalGrants)
+	} else if hasTotalUsed {
+		balanceUsed = fmt.Sprintf("%.2f", totalUsed)
 	}
-	if used, ok := result["total_used"].(float64); ok {
-		balanceUsed = fmt.Sprintf("%.2f", used)
-	}
-	if remaining, ok := result["remaining"].(float64); ok {
+
+	// 如果没有 total_grants，但有 remaining 字段，作为剩余值
+	if remaining, ok := result["remaining"].(float64); ok && !hasTotalGrants {
 		balanceTotal = fmt.Sprintf("%.2f", remaining)
 	}
 
 	// 检查是否有 balance 字段（一些平台使用此格式）
-	if balance, ok := result["balance"].(float64); ok {
+	if balance, ok := result["balance"].(float64); ok && !hasTotalGrants {
 		balanceTotal = fmt.Sprintf("%.2f", balance)
 	}
 
@@ -310,15 +332,18 @@ func handleSiliconFlowBalance(ctx context.Context, baseURL string, apiKey string
 		}, nil
 	}
 
-	// 解析响应，字段为字符串类型
+	// 解析响应，字段为字符串类型（硅基流动 API 将数据嵌套在 data 字段中）
+	// 注意：API 可能不返回根级别的 success 字段，使用指针以区分"缺失"和"false"
 	var result struct {
-		Success       bool   `json:"success"`
-		Name          string `json:"name"`
-		Email         string `json:"email"`
-		Balance       string `json:"balance"`
-		ChargeBalance string `json:"chargeBalance"`
-		TotalBalance  string `json:"totalBalance"`
-		Status        string `json:"status"`
+		Success *bool `json:"success"`
+		Data    struct {
+			Name          string `json:"name"`
+			Email         string `json:"email"`
+			Balance       string `json:"balance"`
+			ChargeBalance string `json:"chargeBalance"`
+			TotalBalance  string `json:"totalBalance"`
+			Status        string `json:"status"`
+		} `json:"data"`
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
@@ -328,7 +353,8 @@ func handleSiliconFlowBalance(ctx context.Context, baseURL string, apiKey string
 		}, nil
 	}
 
-	if !result.Success {
+	// 仅当 API 明确返回 success=false 时才报错，字段缺失时视为成功
+	if result.Success != nil && !*result.Success {
 		return &BalanceInfo{
 			Success:      false,
 			ErrorMessage: "API 返回 success=false",
@@ -336,13 +362,13 @@ func handleSiliconFlowBalance(ctx context.Context, baseURL string, apiKey string
 	}
 
 	// 处理余额值，确保显示正确的格式
-	balanceTotal := result.TotalBalance
+	balanceTotal := result.Data.TotalBalance
 	if balanceTotal == "" {
 		balanceTotal = "0"
 	}
 
 	// 状态默认值
-	status := result.Status
+	status := result.Data.Status
 	if status == "" {
 		status = "unknown"
 	}
@@ -357,11 +383,25 @@ func handleSiliconFlowBalance(ctx context.Context, baseURL string, apiKey string
 }
 
 // handleChatAnywhereBalance ChatAnywhere 余额查询（特殊处理）
+// baseURL 来自分组 Upstreams 配置，基于该 host 拼接余额查询地址。
+// ChatAnywhere 各域名均使用统一的余额查询路径 /v1/query/balance。
 func handleChatAnywhereBalance(ctx context.Context, baseURL string, apiKey string, customPath string) (*BalanceInfo, error) {
-	// ChatAnywhere 使用不同的域名进行余额查询
-	balanceURL := "https://api.chatanywhere.tech/v1/query/balance"
+	parsedURL, err := url.Parse(baseURL)
+	if err != nil {
+		return &BalanceInfo{
+			Success:      false,
+			ErrorMessage: fmt.Sprintf("failed to parse baseURL: %v", err),
+		}, nil
+	}
 
-	req, err := http.NewRequestWithContext(ctx, "GET", balanceURL, nil)
+	// 余额查询固定使用 https + 分组配置的 host + /v1/query/balance
+	balancePath := customPath
+	if balancePath == "" {
+		balancePath = "/v1/query/balance"
+	}
+	balanceURL := "https://" + parsedURL.Host + balancePath
+
+	req, err := http.NewRequestWithContext(ctx, "POST", balanceURL, nil)
 	if err != nil {
 		return &BalanceInfo{
 			Success:      false,
@@ -369,7 +409,7 @@ func handleChatAnywhereBalance(ctx context.Context, baseURL string, apiKey strin
 		}, nil
 	}
 
-	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Authorization", apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := serviceHTTPClient.Do(req)
@@ -388,15 +428,8 @@ func handleChatAnywhereBalance(ctx context.Context, baseURL string, apiKey strin
 		}, nil
 	}
 
-	var result struct {
-		AdminKeyId   string `json:"adminKeyId"`
-		ApiKey       string `json:"apiKey"`
-		BalanceTotal string `json:"balanceTotal"`
-		BalanceUsed  string `json:"balanceUsed"`
-		ID           string `json:"id"`
-		Status       string `json:"status"`
-	}
-
+	// 使用 map 解析，因为字段类型可能是数字或字符串（不同 API 版本返回可能不同）
+	var result map[string]interface{}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return &BalanceInfo{
 			Success:      false,
@@ -404,40 +437,35 @@ func handleChatAnywhereBalance(ctx context.Context, baseURL string, apiKey strin
 		}, nil
 	}
 
-	// 处理空值
-	balanceTotal := result.BalanceTotal
-	if balanceTotal == "" {
-		balanceTotal = "N/A"
-	}
-
-	balanceUsed := result.BalanceUsed
-	if balanceUsed == "" {
-		balanceUsed = "N/A"
-	}
-
-	// 设置默认值
-	status := result.Status
-	if status == "" {
-		status = "N/A"
-	}
-
-	id := result.ID
-	if id == "" {
-		id = "N/A"
-	}
-
-	adminKeyID := result.AdminKeyId
-	if adminKeyID == "" {
-		adminKeyID = "N/A"
+	// 辅助函数：安全获取字段值并转为字符串
+	getString := func(key string) string {
+		v, ok := result[key]
+		if !ok || v == nil {
+			return "N/A"
+		}
+		switch val := v.(type) {
+		case string:
+			if val == "" {
+				return "N/A"
+			}
+			return val
+		case float64:
+			if val == float64(int64(val)) {
+				return fmt.Sprintf("%d", int64(val))
+			}
+			return fmt.Sprintf("%v", val)
+		default:
+			return fmt.Sprintf("%v", val)
+		}
 	}
 
 	return &BalanceInfo{
 		Success:      true,
-		BalanceTotal: balanceTotal,
-		BalanceUsed:  balanceUsed,
-		Status:       status,
-		ID:           id,
-		AdminKeyID:   adminKeyID,
+		BalanceTotal: getString("balanceTotal"),
+		BalanceUsed:  getString("balanceUsed"),
+		Status:       getString("status"),
+		ID:           getString("id"),
+		AdminKeyID:   getString("adminKeyId"),
 		Currency:     "USD",
 	}, nil
 }
@@ -967,6 +995,6 @@ func LogBalanceQueryResult(apiKey *models.APIKey, balanceInfo *BalanceInfo, grou
 		logrus.WithFields(fields).Info("Balance query successful")
 	} else {
 		fields["error"] = balanceInfo.ErrorMessage
-		logrus.WithFields(fields).Debug("Balance query failed")
+		logrus.WithFields(fields).Warn("Balance query failed")
 	}
 }

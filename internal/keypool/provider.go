@@ -22,19 +22,21 @@ import (
 var asyncSemaphore = make(chan struct{}, 100)
 
 type KeyProvider struct {
-	db              *gorm.DB
-	store           store.Store
-	settingsManager *config.SystemSettingsManager
-	encryptionSvc   encryption.Service
+	db                *gorm.DB
+	store             store.Store
+	settingsManager   *config.SystemSettingsManager
+	encryptionSvc     encryption.Service
+	modelScopeLimiter *ModelScopeLimiter
 }
 
 // NewProvider 创建一个新的 KeyProvider 实例。
 func NewProvider(db *gorm.DB, store store.Store, settingsManager *config.SystemSettingsManager, encryptionSvc encryption.Service) *KeyProvider {
 	return &KeyProvider{
-		db:              db,
-		store:           store,
-		settingsManager: settingsManager,
-		encryptionSvc:   encryptionSvc,
+		db:                db,
+		store:             store,
+		settingsManager:   settingsManager,
+		encryptionSvc:     encryptionSvc,
+		modelScopeLimiter: NewModelScopeLimiter(),
 	}
 }
 
@@ -89,6 +91,66 @@ func (p *KeyProvider) SelectKey(groupID uint) (*models.APIKey, error) {
 	}
 
 	return apiKey, nil
+}
+
+// SelectKeyWithModelCheck 为指定的分组选择密钥，同时检查模型维度限流（仅针对魔塔平台）
+// upstreamURL: 上游地址，用于判断是否魔塔平台
+// model: 请求模型名称
+// maxRetries: 最大重试次数
+func (p *KeyProvider) SelectKeyWithModelCheck(groupID uint, upstreamURL string, model string, maxRetries int) (*models.APIKey, error) {
+	// 非魔塔平台，直接走原有逻辑
+	if !IsModelScopeUpstream(upstreamURL) {
+		return p.SelectKey(groupID)
+	}
+
+	// 魔塔平台，需要检查模型维度限流
+	// 记录本轮已尝试过的 keyID，避免 Rotate 循环返回同一批密钥
+	triedKeys := make(map[uint]struct{})
+
+	for i := 0; i <= maxRetries; i++ {
+		apiKey, err := p.SelectKey(groupID)
+		if err != nil {
+			return nil, err
+		}
+
+		// 跳过已尝试过的密钥（Rotate 在并发下可能重复返回同一密钥）
+		if _, ok := triedKeys[apiKey.ID]; ok {
+			continue
+		}
+		triedKeys[apiKey.ID] = struct{}{}
+
+		// 尝试获取配额（原子操作：检查 + 扣减）
+		if p.modelScopeLimiter.TryAcquire(apiKey.ID, model) {
+			return apiKey, nil
+		}
+
+		// 该密钥对该模型次数已用完，记录日志并继续尝试下一个
+		logrus.WithFields(logrus.Fields{
+			"keyID": apiKey.ID,
+			"model": model,
+			"retry": i + 1,
+		}).Debug("Key has reached model-specific limit, trying next key")
+	}
+
+	return nil, app_errors.ErrNoKeysAvailable
+}
+
+// UpdateModelScopeRemaining 更新魔塔平台模型维度剩余次数（从响应头）
+func (p *KeyProvider) UpdateModelScopeRemaining(apiKey *models.APIKey, model string, headerValue string) {
+	if p.modelScopeLimiter == nil {
+		return
+	}
+	p.modelScopeLimiter.UpdateModelRemainingFromHeader(apiKey.ID, model, headerValue)
+}
+
+// GetModelScopeLimiterStats 获取魔塔限流器统计信息
+func (p *KeyProvider) GetModelScopeLimiterStats() map[string]interface{} {
+	if p.modelScopeLimiter == nil {
+		return map[string]interface{}{"enabled": false}
+	}
+	stats := p.modelScopeLimiter.GetStats()
+	stats["enabled"] = true
+	return stats
 }
 
 // UpdateStatus 异步地提交一个 Key 状态更新任务。
