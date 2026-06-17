@@ -8,7 +8,7 @@ on:
       - "*"
 jobs:
   release:
-    runs-on: macos-13
+    runs-on: macos-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -36,9 +36,11 @@ jobs:
       - name: Download Go modules
         run: go mod download
 
-      - name: Build Backend (arm64 + amd64)
+      - name: Build Backend for arm64
         run: |
-          CGO_ENABLED=0 go build -ldflags "-s -w -X gpt-load/internal/version.Version=${{ github.ref_name }}" -o gpt-load-macos-arm64
+          CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags "-s -w -X gpt-load/internal/version.Version=${{ github.ref_name }}" -o gpt-load-macos-arm64
+      - name: Build Backend for amd64
+        run: |
           CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags "-s -w -X gpt-load/internal/version.Version=${{ github.ref_name }}" -o gpt-load-macos-amd64
 
       - name: Release
