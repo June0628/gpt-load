@@ -280,12 +280,32 @@ func (ps *ProxyServer) executeRequestWithRetry(
 				logrus.Debugf("Request failed with status %d (attempt %d/%d) for key %s. Parsed Error: %s", statusCode, retryCount+1, maxRetries+1, utils.MaskAPIKey(apiKey.KeyValue), parsedError)
 			}
 
-			// 魔塔平台 429（模型维度限流）不触发密钥故障计数，由 limiter 单独管理
+			// 魔塔平台 429 需要区分两种错误：
+			// 1. "exceeded your current quota, please check your plan and billing details" -> 永久禁用密钥
+			// 2. "exceeded today's quota for model X" -> 今日禁用该模型，不触发密钥故障计数
 			if keypool.IsModelScopeUpstream(upstreamURL) && statusCode == http.StatusTooManyRequests {
-				logrus.WithFields(logrus.Fields{
-					"keyID": apiKey.ID,
-					"model": modelName,
-				}).Debug("ModelScope 429 rate limit, skipping key failure count")
+				parsedErrorLower := strings.ToLower(parsedError)
+				if strings.Contains(parsedErrorLower, "exceeded your current quota, please check your plan and billing details") {
+					// 账户整体配额耗尽，永久禁用密钥
+					logrus.WithFields(logrus.Fields{
+						"keyID": apiKey.ID,
+						"model": modelName,
+					}).Warn("ModelScope key quota exhausted, disabling key permanently")
+					ps.keyProvider.UpdateStatus(apiKey, group, false, parsedError)
+				} else if strings.Contains(parsedErrorLower, "exceeded today's quota for model") {
+					// 单个模型当日配额耗尽，将该模型剩余次数设为 0，不触发密钥故障计数
+					logrus.WithFields(logrus.Fields{
+						"keyID": apiKey.ID,
+						"model": modelName,
+					}).Debug("ModelScope model daily quota exhausted, setting remaining to 0")
+					ps.keyProvider.UpdateModelScopeRemaining(apiKey, modelName, "0")
+				} else {
+					// 其他 429，跳过故障计数
+					logrus.WithFields(logrus.Fields{
+						"keyID": apiKey.ID,
+						"model": modelName,
+					}).Debug("ModelScope 429 rate limit, skipping key failure count")
+				}
 			} else {
 				ps.keyProvider.UpdateStatus(apiKey, group, false, parsedError)
 			}

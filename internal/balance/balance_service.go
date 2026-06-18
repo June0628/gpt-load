@@ -384,22 +384,13 @@ func handleSiliconFlowBalance(ctx context.Context, baseURL string, apiKey string
 
 // handleChatAnywhereBalance ChatAnywhere 余额查询（特殊处理）
 // baseURL 来自分组 Upstreams 配置，基于该 host 拼接余额查询地址。
-// ChatAnywhere 各域名均使用统一的余额查询路径 /v1/query/balance。
 func handleChatAnywhereBalance(ctx context.Context, baseURL string, apiKey string, customPath string) (*BalanceInfo, error) {
-	parsedURL, err := url.Parse(baseURL)
-	if err != nil {
-		return &BalanceInfo{
-			Success:      false,
-			ErrorMessage: fmt.Sprintf("failed to parse baseURL: %v", err),
-		}, nil
-	}
-
-	// 余额查询固定使用 https + 分组配置的 host + /v1/query/balance
+	// 余额查询统一使用 tech 域名（官方余额接口），与 Python 脚本保持一致
 	balancePath := customPath
 	if balancePath == "" {
 		balancePath = "/v1/query/balance"
 	}
-	balanceURL := "https://" + parsedURL.Host + balancePath
+	balanceURL := "https://api.chatanywhere.tech" + balancePath
 
 	req, err := http.NewRequestWithContext(ctx, "POST", balanceURL, nil)
 	if err != nil {
@@ -409,8 +400,19 @@ func handleChatAnywhereBalance(ctx context.Context, baseURL string, apiKey strin
 		}, nil
 	}
 
+	// 参照 ChatAnywhere 官方余额查询脚本的请求头配置
 	req.Header.Set("Authorization", apiKey)
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("accept", "application/json, text/plain, */*")
+	req.Header.Set("accept-language", "zh-CN,zh;q=0.9,en;q=0.8")
+	req.Header.Set("access-control-allow-headers", "Authorization,Origin, X-Requested-With, Content-Type, Accept")
+	req.Header.Set("access-control-allow-methods", "GET,POST")
+	req.Header.Set("access-control-allow-origin", "*")
+	req.Header.Set("cache-control", "no-cache")
+	req.Header.Set("content-length", "0")
+	req.Header.Set("origin", "https://api.chatanywhere.tech")
+	req.Header.Set("pragma", "no-cache")
+	req.Header.Set("referer", "https://api.chatanywhere.tech/")
+	req.Header.Set("user-agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36")
 
 	resp, err := serviceHTTPClient.Do(req)
 	if err != nil {
@@ -428,8 +430,15 @@ func handleChatAnywhereBalance(ctx context.Context, baseURL string, apiKey strin
 		}, nil
 	}
 
-	// 使用 map 解析，因为字段类型可能是数字或字符串（不同 API 版本返回可能不同）
-	var result map[string]interface{}
+	// 使用结构体解析，匹配 ChatAnywhere 余额查询 API 返回的字段
+	var result struct {
+		AdminKeyID   int     `json:"adminKeyId"`
+		APIKey       string  `json:"apiKey"`
+		BalanceTotal float64 `json:"balanceTotal"`
+		BalanceUsed  float64 `json:"balanceUsed"`
+		ID           int     `json:"id"`
+		Status       int     `json:"status"`
+	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return &BalanceInfo{
 			Success:      false,
@@ -437,35 +446,26 @@ func handleChatAnywhereBalance(ctx context.Context, baseURL string, apiKey strin
 		}, nil
 	}
 
-	// 辅助函数：安全获取字段值并转为字符串
-	getString := func(key string) string {
-		v, ok := result[key]
-		if !ok || v == nil {
-			return "N/A"
-		}
-		switch val := v.(type) {
-		case string:
-			if val == "" {
-				return "N/A"
-			}
-			return val
-		case float64:
-			if val == float64(int64(val)) {
-				return fmt.Sprintf("%d", int64(val))
-			}
-			return fmt.Sprintf("%v", val)
-		default:
-			return fmt.Sprintf("%v", val)
-		}
+	// 格式化余额字段
+	// balanceTotal 是总投放额度，balanceUsed 是已用额度
+	// 可用余额 = 总额度 - 已用额度
+	availableBalance := result.BalanceTotal - result.BalanceUsed
+	if availableBalance < 0 {
+		availableBalance = 0
 	}
+	balanceTotal := fmt.Sprintf("%.2f", availableBalance)
+	balanceUsed := fmt.Sprintf("%.2f", result.BalanceUsed)
+	status := fmt.Sprintf("%d", result.Status)
+	adminKeyID := fmt.Sprintf("%d", result.AdminKeyID)
+	id := fmt.Sprintf("%d", result.ID)
 
 	return &BalanceInfo{
 		Success:      true,
-		BalanceTotal: getString("balanceTotal"),
-		BalanceUsed:  getString("balanceUsed"),
-		Status:       getString("status"),
-		ID:           getString("id"),
-		AdminKeyID:   getString("adminKeyId"),
+		BalanceTotal: balanceTotal,
+		BalanceUsed:  balanceUsed,
+		Status:       status,
+		ID:           id,
+		AdminKeyID:   adminKeyID,
 		Currency:     "USD",
 	}, nil
 }
@@ -944,9 +944,15 @@ func AggregateBalanceInfo(balanceInfos []*BalanceInfo) *BalanceInfo {
 
 		// 解析余额数值
 		if total, err := parseBalance(binfo.BalanceTotal); err == nil {
+			if total < 0 {
+				total = 0
+			}
 			totalBalance += total
 		}
 		if used, err := parseBalance(binfo.BalanceUsed); err == nil {
+			if used < 0 {
+				used = 0
+			}
 			totalUsed += used
 		}
 	}

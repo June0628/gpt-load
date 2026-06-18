@@ -343,6 +343,9 @@ func (s *Server) aggregateGroupBalance(ctx *gin.Context, group *models.Group) *G
 	for _, key := range apiKeys {
 		if key.BalanceTotal != "" && key.BalanceTotal != "N/A" {
 			if balance, err := strconv.ParseFloat(key.BalanceTotal, 64); err == nil {
+				if balance < 0 {
+					balance = 0
+				}
 				totalBalance += balance
 			}
 			successCount++
@@ -351,6 +354,9 @@ func (s *Server) aggregateGroupBalance(ctx *gin.Context, group *models.Group) *G
 		}
 		if key.BalanceUsed != "" && key.BalanceUsed != "N/A" {
 			if used, err := strconv.ParseFloat(key.BalanceUsed, 64); err == nil {
+				if used < 0 {
+					used = 0
+				}
 				totalUsed += used
 			}
 		}

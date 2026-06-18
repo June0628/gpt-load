@@ -3,6 +3,7 @@ package errors
 import "strings"
 
 // unCountedSubstrings 包含表示错误的子字符串列表
+// 这些错误不会触发密钥故障计数（failure_count）
 var unCountedSubstrings = []string{
 	"resource has been exhausted",
 	"please reduce the length of the messages",
