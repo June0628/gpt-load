@@ -12,7 +12,7 @@ jobs:
     timeout-minutes: 45
     permissions:
       packages: write
-      contents: read
+      contents: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -64,3 +64,22 @@ jobs:
           cache-to: type=gha,mode=max
           build-args: |
             VERSION=${{ github.ref_name }}
+
+      - name: Update GitHub Release with Docker image info
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          body: |
+            ## Docker Image
+
+            Docker image is available on GitHub Container Registry:
+
+            ```bash
+            docker pull ghcr.io/${{ github.repository }}:${{ github.ref_name }}
+            ```
+
+            Supported platforms: `linux/amd64`, `linux/arm64`
+          draft: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
