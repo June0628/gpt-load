@@ -23,6 +23,9 @@ import (
 	"gorm.io/gorm"
 )
 
+// ErrEmptyTableSkipped 表示表为空，上传被跳过（不应被视为上传成功，删除路径需据此跳过删除）
+var ErrEmptyTableSkipped = fmt.Errorf("table is empty, upload skipped")
+
 // LogUploadService 负责将日志表数据上传到外部存储
 type LogUploadService struct {
 	db              *gorm.DB
@@ -59,12 +62,18 @@ func (s *LogUploadService) UploadTable(tableName string) error {
 
 // UploadAndDeleteTable 在同一个锁内执行上传 + 删除操作，防止并发竞态
 // 用于手动上传后自动删除的场景
+// 仅当上传真正成功时才删除表，失败不删除以避免数据丢失。
 func (s *LogUploadService) UploadAndDeleteTable(tableName string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	// 上传
 	if err := s.uploadTableLocked(tableName); err != nil {
+		// 空表跳过：不视为错误，但也不删除表（交由调用方决定）
+		if err == ErrEmptyTableSkipped {
+			logrus.WithField("table", tableName).Info("表为空，跳过上传且不删除表")
+			return err
+		}
 		return err
 	}
 
@@ -106,8 +115,9 @@ func (s *LogUploadService) uploadTableLocked(tableName string) error {
 	}
 
 	if count == 0 {
+		// 空表返回哨兵错误，避免被误当作上传成功
 		logrus.WithField("table", tableName).Info("表为空，跳过上传")
-		return nil
+		return ErrEmptyTableSkipped
 	}
 
 	// 生成文件名
@@ -161,16 +171,18 @@ func (s *LogUploadService) exportTableToCSVStream(tableName string, onRow func([
 		for i, val := range values {
 			if val == nil {
 				record[i] = ""
-			} else {
-				switch v := val.(type) {
-				case []byte:
-					record[i] = string(v)
-				case time.Time:
-					record[i] = v.Format(time.RFC3339)
-				default:
-					record[i] = fmt.Sprintf("%v", v)
-				}
+				continue
 			}
+			switch v := val.(type) {
+			case []byte:
+				record[i] = string(v)
+			case time.Time:
+				record[i] = v.Format(time.RFC3339)
+			default:
+				record[i] = fmt.Sprintf("%v", v)
+			}
+			// 防止 CSV 公式注入：以 = + - @ 开头的单元格会被 Excel/Sheets 解释为公式
+			record[i] = sanitizeCSVCell(record[i])
 		}
 
 		if err := onRow(record); err != nil {
@@ -288,6 +300,7 @@ func (s *LogUploadService) uploadTableToTencentCOSStream(tableName, objectKey st
 	// 创建上传请求，使用 pipe reader 作为请求体
 	req, err := http.NewRequest("PUT", endpoint, reader)
 	if err != nil {
+		writer.Close()
 		return fmt.Errorf("创建 COS 上传请求失败: %w", err)
 	}
 
@@ -301,7 +314,7 @@ func (s *LogUploadService) uploadTableToTencentCOSStream(tableName, objectKey st
 	authorization := s.cosAuthorization(secretID, secretKey, "put", "/"+encodedKey, host)
 	req.Header.Set("Authorization", authorization)
 
-	// 在 goroutine 中写入 CSV 数据到 pipe
+	// 使用独立变量捕获写入错误，避免与外层 err 竞态
 	writeDone := make(chan error, 1)
 	go func() {
 		defer writer.Close()
@@ -310,7 +323,7 @@ func (s *LogUploadService) uploadTableToTencentCOSStream(tableName, objectKey st
 		rowCount := 0
 
 		// 流式导出到 pipe
-		_, err = s.exportTableToCSVStream(tableName, func(row []string) error {
+		_, writeErr := s.exportTableToCSVStream(tableName, func(row []string) error {
 			if err := csvWriter.Write(row); err != nil {
 				return err
 			}
@@ -326,8 +339,8 @@ func (s *LogUploadService) uploadTableToTencentCOSStream(tableName, objectKey st
 			return nil
 		})
 
-		if err != nil {
-			writeDone <- fmt.Errorf("导出表数据为 CSV 失败: %w", err)
+		if writeErr != nil {
+			writeDone <- fmt.Errorf("导出表数据为 CSV 失败: %w", writeErr)
 			return
 		}
 
@@ -349,7 +362,9 @@ func (s *LogUploadService) uploadTableToTencentCOSStream(tableName, objectKey st
 	client := &http.Client{Timeout: 60 * time.Minute}
 	resp, err := client.Do(req)
 	if err != nil {
-		// 上传失败，尝试降级方案
+		// client.Do 失败时 reader 端无人读取，writer goroutine 会阻塞在 writer.Write。
+		// 关闭 reader 触发 writer 写错误使其退出，避免 <-writeDone 永久阻塞（死锁）。
+		reader.Close()
 		<-writeDone // 等待 writer goroutine 结束
 		logrus.WithError(err).Warn("流式上传失败，回退到临时文件上传")
 		return s.uploadTableToTencentCOSWithTempFile(tableName, objectKey, settings)
@@ -396,7 +411,7 @@ func (s *LogUploadService) uploadTableToTencentCOSWithTempFile(tableName, object
 
 	if rowCount == 0 {
 		logrus.WithField("table", tableName).Info("表为空，跳过上传")
-		return nil
+		return ErrEmptyTableSkipped
 	}
 
 	logrus.WithFields(logrus.Fields{
@@ -540,6 +555,7 @@ func (s *LogUploadService) uploadTableToWebDAVStream(tableName, filename string,
 
 // uploadTableToWebDAVWithGzipTempFile 导出表数据为 CSV 并压缩成 gzip，然后上传
 // 适用于大表上传，可显著减少上传时间和流量
+// 上传后通过 HEAD 请求验证文件存在且大小匹配
 func (s *LogUploadService) uploadTableToWebDAVWithGzipTempFile(tableName, filename string, settings types.SystemSettings) error {
 	logrus.WithField("table", tableName).Info("使用 gzip 压缩临时文件上传到 WebDAV")
 
@@ -552,7 +568,7 @@ func (s *LogUploadService) uploadTableToWebDAVWithGzipTempFile(tableName, filena
 
 	if rowCount == 0 {
 		logrus.WithField("table", tableName).Info("表为空，跳过上传")
-		return nil
+		return ErrEmptyTableSkipped
 	}
 
 	// 压缩为 gzip
@@ -562,9 +578,12 @@ func (s *LogUploadService) uploadTableToWebDAVWithGzipTempFile(tableName, filena
 	}
 	defer os.Remove(gzipFile)
 
-	// 获取文件大小用于日志
+	// 获取文件大小用于日志和校验
 	csvInfo, _ := os.Stat(tmpCSV)
-	gzInfo, _ := os.Stat(gzipFile)
+	gzInfo, err := os.Stat(gzipFile)
+	if err != nil {
+		return fmt.Errorf("获取 gzip 文件信息失败: %w", err)
+	}
 	if csvInfo != nil && gzInfo != nil {
 		compressionRatio := float64(gzInfo.Size()) / float64(csvInfo.Size()) * 100
 		logrus.WithFields(logrus.Fields{
@@ -580,8 +599,64 @@ func (s *LogUploadService) uploadTableToWebDAVWithGzipTempFile(tableName, filena
 	gzipFilename := filename + ".gz"
 
 	// 上传到 WebDAV
+	expectedSize := gzInfo.Size()
 	if err := s.uploadFileToWebDAV(gzipFile, gzipFilename, settings); err != nil {
 		return fmt.Errorf("gzip 文件上传失败: %w", err)
+	}
+
+	// 事后验证：通过 HEAD 请求确认文件已写入且大小匹配
+	if err := s.verifyWebDAVUpload(gzipFilename, expectedSize, settings); err != nil {
+		return fmt.Errorf("WebDAV 上传事后验证失败，不删除源数据: %w", err)
+	}
+
+	logrus.WithFields(logrus.Fields{
+		"table":         tableName,
+		"filename":      gzipFilename,
+		"expected_size": expectedSize,
+	}).Info("WebDAV 上传成功并通过事后验证")
+	return nil
+}
+
+// verifyWebDAVUpload 通过 HEAD 请求验证上传的文件存在且大小匹配
+// verifyWebDAVUpload 通过 HEAD 请求验证文件存在且大小匹配
+func (s *LogUploadService) verifyWebDAVUpload(filename string, expectedSize int64, settings types.SystemSettings) error {
+	baseURL := settings.LogUploadWebDAVURL
+	username := settings.LogUploadWebDAVUsername
+	password := settings.LogUploadWebDAVPassword
+
+	if baseURL == "" {
+		return fmt.Errorf("WebDAV URL 未配置")
+	}
+	if !strings.HasSuffix(baseURL, "/") {
+		baseURL += "/"
+	}
+
+	filename = strings.TrimPrefix(filename, "/")
+	verifyURL := baseURL + filename
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	req, err := http.NewRequest("HEAD", verifyURL, nil)
+	if err != nil {
+		return fmt.Errorf("创建 WebDAV 验证请求失败: %w", err)
+	}
+	if username != "" || password != "" {
+		req.SetBasicAuth(username, password)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("WebDAV 验证请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// HEAD 请求成功状态码：200 或 207（PROPFIND 风格）
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("WebDAV 验证失败，文件不存在，状态码 %d", resp.StatusCode)
+	}
+
+	// 校验文件大小（部分 WebDAV 服务器可能不返回 Content-Length，此时仅校验存在性）
+	if resp.ContentLength >= 0 && resp.ContentLength != expectedSize {
+		return fmt.Errorf("WebDAV 验证失败，文件大小不匹配: 期望 %d, 实际 %d", expectedSize, resp.ContentLength)
 	}
 
 	return nil
@@ -671,12 +746,116 @@ func (s *LogUploadService) uploadFileToWebDAV(filePath, filename string, setting
 	}
 	defer resp.Body.Close()
 
+	// PUT 失败时自动通过 MKCOL 创建目录后重试一次
+	if resp.StatusCode == http.StatusConflict || resp.StatusCode == http.StatusNotFound {
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		logrus.WithField("url", uploadURL).WithField("status", resp.StatusCode).Warn("WebDAV PUT failed, attempting to create target directory via MKCOL and retry; body=" + string(body))
+		if mkcolErr := s.ensureWebDAVDirectory(filename, settings); mkcolErr != nil {
+			return fmt.Errorf("WebDAV 上传失败(状态码 %d)，且自动创建目录失败: %w", resp.StatusCode, mkcolErr)
+		}
+
+		// 重新打开文件用于重试
+		retryFile, retryErr := os.Open(filePath)
+		if retryErr != nil {
+			return fmt.Errorf("重新打开上传文件失败: %w", retryErr)
+		}
+		defer retryFile.Close()
+
+		retryReq, retryErr := http.NewRequest("PUT", uploadURL, retryFile)
+		if retryErr != nil {
+			return fmt.Errorf("创建 WebDAV 重试上传请求失败: %w", retryErr)
+		}
+		retryReq.ContentLength = fileInfo.Size()
+		if strings.HasSuffix(strings.ToLower(filename), ".gz") {
+			retryReq.Header.Set("Content-Type", "application/gzip")
+		} else {
+			retryReq.Header.Set("Content-Type", "text/csv")
+		}
+		if username != "" || password != "" {
+			retryReq.SetBasicAuth(username, password)
+		}
+
+		retryResp, retryErr := client.Do(retryReq)
+		if retryErr != nil {
+			return fmt.Errorf("WebDAV 重试上传请求失败: %w", retryErr)
+		}
+		defer retryResp.Body.Close()
+
+		if retryResp.StatusCode < 200 || retryResp.StatusCode >= 300 {
+			body, _ := io.ReadAll(retryResp.Body)
+			return fmt.Errorf("WebDAV 重试上传仍失败，状态码 %d: %s", retryResp.StatusCode, string(body))
+		}
+
+		logrus.WithField("url", uploadURL).Info("WebDAV 上传成功（MKCOL 创建目录后重试）")
+		return nil
+	}
+
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("WebDAV 上传失败，状态码 %d: %s", resp.StatusCode, string(body))
 	}
 
 	logrus.WithField("url", uploadURL).Info("WebDAV 上传成功")
+	return nil
+}
+
+// ensureWebDAVDirectory 通过 MKCOL 创建 filename 所在的父目录（支持多级）。
+// ensureWebDAVDirectory 通过 MKCOL 逐级创建父目录
+func (s *LogUploadService) ensureWebDAVDirectory(filename string, settings types.SystemSettings) error {
+	baseURL := settings.LogUploadWebDAVURL
+	username := settings.LogUploadWebDAVUsername
+	password := settings.LogUploadWebDAVPassword
+
+	if baseURL == "" {
+		return fmt.Errorf("WebDAV URL 未配置")
+	}
+	if !strings.HasSuffix(baseURL, "/") {
+		baseURL += "/"
+	}
+
+	filename = strings.TrimPrefix(filename, "/")
+	// 提取目录部分（去掉最后的文件名）
+	idx := strings.LastIndex(filename, "/")
+	if idx <= 0 {
+		// 没有子目录，无需创建
+		return nil
+	}
+	dirPath := filename[:idx] // 例如 "backup/sub"
+
+	client := &http.Client{Timeout: 30 * time.Second}
+
+	// 逐级创建目录：backup -> backup/sub
+	parts := strings.Split(dirPath, "/")
+	current := ""
+	for _, part := range parts {
+		if part == "" {
+			continue
+		}
+		current = current + "/" + part
+		mkcolURL := baseURL + strings.TrimPrefix(current, "/") + "/"
+
+		req, err := http.NewRequest("MKCOL", mkcolURL, nil)
+		if err != nil {
+			return fmt.Errorf("创建 MKCOL 请求失败: %w", err)
+		}
+		if username != "" || password != "" {
+			req.SetBasicAuth(username, password)
+		}
+
+		resp, err := client.Do(req)
+		if err != nil {
+			return fmt.Errorf("MKCOL 请求失败: %w", err)
+		}
+		// 201 Created 表示新建成功；405 Method Not Allowed 通常表示目录已存在，可忽略
+		if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusMethodNotAllowed {
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			return fmt.Errorf("MKCOL 创建目录 %s 失败，状态码 %d: %s", mkcolURL, resp.StatusCode, string(body))
+		}
+		resp.Body.Close()
+	}
+
 	return nil
 }
 
@@ -689,6 +868,18 @@ func encodeObjectKey(objectKey string) string {
 		parts[i] = url.PathEscape(part)
 	}
 	return strings.Join(parts, "/")
+}
+
+// sanitizeCSVCell 防止 CSV 公式注入：以 = + - @ 开头的单元格加单引号前缀
+func sanitizeCSVCell(val string) string {
+	if len(val) == 0 {
+		return val
+	}
+	switch val[0] {
+	case '=', '+', '-', '@':
+		return "'" + val
+	}
+	return val
 }
 
 // ============================================================

@@ -36,6 +36,7 @@ type App struct {
 	requestLogService *services.RequestLogService
 	cronChecker       *keypool.CronChecker
 	keyPoolProvider   *keypool.KeyProvider
+	keyService        *services.KeyService
 	proxyServer       *proxy.ProxyServer
 	storage           store.Store
 	db                *gorm.DB
@@ -54,6 +55,7 @@ type AppParams struct {
 	RequestLogService *services.RequestLogService
 	CronChecker       *keypool.CronChecker
 	KeyPoolProvider   *keypool.KeyProvider
+	KeyService        *services.KeyService
 	ProxyServer       *proxy.ProxyServer
 	Storage           store.Store
 	DB                *gorm.DB
@@ -71,6 +73,7 @@ func NewApp(params AppParams) *App {
 		requestLogService: params.RequestLogService,
 		cronChecker:       params.CronChecker,
 		keyPoolProvider:   params.KeyPoolProvider,
+		keyService:        params.KeyService,
 		proxyServer:       params.ProxyServer,
 		storage:           params.Storage,
 		db:                params.DB,
@@ -124,6 +127,9 @@ func (a *App) Start() error {
 			return fmt.Errorf("failed to load keys into key pool: %w", err)
 		}
 		logrus.Debug("API keys loaded into Redis cache by master.")
+
+		// 注入余额查询互斥锁
+		a.cronChecker.SetBalanceQueryLocker(a.keyService)
 
 		// 仅 Master 节点启动的服务
 		a.requestLogService.Start()

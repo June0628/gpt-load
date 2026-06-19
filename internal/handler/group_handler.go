@@ -318,13 +318,14 @@ type GroupResponse struct {
 }
 
 // aggregateGroupBalance 聚合分组下所有 API 密钥的余额信息
+// 只聚合 active 状态的密钥
 func (s *Server) aggregateGroupBalance(ctx *gin.Context, group *models.Group) *GroupBalanceInfoResponse {
 	if group.GroupType == "aggregate" {
 		return nil
 	}
 
 	var apiKeys []models.APIKey
-	if err := s.DB.WithContext(ctx.Request.Context()).Where("group_id = ?", group.ID).Find(&apiKeys).Error; err != nil {
+	if err := s.DB.WithContext(ctx.Request.Context()).Where("group_id = ? AND status = ?", group.ID, models.KeyStatusActive).Find(&apiKeys).Error; err != nil {
 		logrus.WithContext(ctx.Request.Context()).WithError(err).Error("Failed to fetch API keys for balance aggregation")
 		return nil
 	}
@@ -347,8 +348,10 @@ func (s *Server) aggregateGroupBalance(ctx *gin.Context, group *models.Group) *G
 					balance = 0
 				}
 				totalBalance += balance
+				successCount++
+			} else {
+				failCount++
 			}
-			successCount++
 		} else {
 			failCount++
 		}
@@ -375,8 +378,8 @@ func (s *Server) aggregateGroupBalance(ctx *gin.Context, group *models.Group) *G
 			}
 			// 从成功查询的密钥中获取币种
 			if currency == "" && key.BalanceTotal != "" && key.BalanceTotal != "N/A" {
-				// 尝试根据余额格式或已知模式推断币种，目前设置默认值
-				currency = s.inferCurrencyFromKey(key)
+				// 根据上游 host 推断币种，国内平台返回 CNY
+				currency = s.inferCurrencyFromGroup(group)
 			}
 		}
 	}
@@ -501,9 +504,44 @@ func (s *Server) GetGroupConfigOptions(c *gin.Context) {
 	response.Success(c, translated)
 }
 
-// inferCurrencyFromKey 尝试根据密钥或分组信息推断币种
-func (s *Server) inferCurrencyFromKey(key models.APIKey) string {
-	// 默认币种为 USD，可根据平台检测增强，实际币种应来自余额查询响应
+// inferCurrencyFromGroup 根据分组的上游 URL 推断币种
+// 根据分组上游 URL 推断币种，国内平台返回 CNY
+func (s *Server) inferCurrencyFromGroup(group *models.Group) string {
+	if len(group.Upstreams) == 0 {
+		return "USD"
+	}
+	var defs []struct {
+		URL    string `json:"url"`
+		Weight int    `json:"weight"`
+	}
+	if err := json.Unmarshal(group.Upstreams, &defs); err != nil {
+		return "USD"
+	}
+	// 国内平台 host 集合，命中则返回 CNY
+	domesticHosts := map[string]bool{
+		"api.deepseek.com":       true,
+		"api.moonshot.cn":        true,
+		"api.baichuan-ai.com":    true,
+		"api.zhipuai.cn":         true,
+		"dashscope.aliyuncs.com": true,
+		"api.siliconflow.cn":     true,
+		"api.minimax.chat":       true,
+		"api.sparkai.com":        true,
+		"api.volcengine.com":     true,
+		"api.chatanywhere.com.cn": true,
+	}
+	for _, def := range defs {
+		if def.URL == "" {
+			continue
+		}
+		parsedURL, err := url.Parse(def.URL)
+		if err != nil {
+			continue
+		}
+		if domesticHosts[parsedURL.Hostname()] {
+			return "CNY"
+		}
+	}
 	return "USD"
 }
 

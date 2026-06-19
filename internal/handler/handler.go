@@ -121,6 +121,7 @@ func (s *Server) Login(c *gin.Context) {
 }
 
 // QueryBalance 手动触发分组余额查询
+// 检查余额查询开关并加锁防止与定时查询竞态
 func (s *Server) QueryBalance(c *gin.Context) {
 	groupIDStr := c.Param("id")
 	groupID, err := strconv.Atoi(groupIDStr)
@@ -140,8 +141,21 @@ func (s *Server) QueryBalance(c *gin.Context) {
 		return
 	}
 
+	// 检查是否启用了余额查询
+	if !group.ShouldQueryBalance() {
+		response.Error(c, app_errors.NewAPIError(app_errors.ErrBadRequest, "该分组未启用余额查询"))
+		return
+	}
+
+	// 加锁防止手动查询与定时查询竞态
+	if !s.KeyService.TryAcquireBalanceQueryLock(group.ID) {
+		response.Error(c, app_errors.NewAPIError(app_errors.ErrBadRequest, "该分组正在进行余额查询，请稍后再试"))
+		return
+	}
+
 	// 异步执行余额查询
 	go func(g *models.Group) {
+		defer s.KeyService.ReleaseBalanceQueryLock(g.ID)
 		s.KeyService.QueryGroupBalances(g)
 	}(group)
 

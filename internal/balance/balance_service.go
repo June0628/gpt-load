@@ -69,8 +69,8 @@ func (s *BalanceService) QueryBalance(ctx context.Context, group *models.Group, 
 		return nil, fmt.Errorf("api key is nil")
 	}
 
-	// 从分组的 Upstreams 配置中获取上游 URL（而非 AppUrl，AppUrl 是应用自身地址）
-	upstreamURL, err := getUpstreamURLFromGroup(group.Upstreams)
+	// 获取所有上游 URL 并匹配正确的平台处理器
+	upstreamURLs, err := getUpstreamURLsFromGroup(group.Upstreams)
 	if err != nil {
 		return &BalanceInfo{
 			Success:      false,
@@ -78,60 +78,74 @@ func (s *BalanceService) QueryBalance(ctx context.Context, group *models.Group, 
 		}, nil
 	}
 
-	parsedURL, err := url.Parse(upstreamURL)
-	if err != nil {
+	// 遍历所有上游，优先选择有专用平台处理器的 URL；若均无专用处理器则使用第一个有效 URL 走默认处理器
+	var (
+		selectedURL  string
+		selectedHost string
+	)
+	for _, u := range upstreamURLs {
+		parsedURL, parseErr := url.Parse(u)
+		if parseErr != nil {
+			continue
+		}
+		host := parsedURL.Hostname()
+		if _, ok := platformHandlers[host]; ok && host != "default" {
+			selectedURL = u
+			selectedHost = host
+			break
+		}
+		if selectedURL == "" {
+			selectedURL = u
+			selectedHost = host
+		}
+	}
+
+	if selectedURL == "" {
 		return &BalanceInfo{
 			Success:      false,
-			ErrorMessage: fmt.Sprintf("failed to parse upstream URL: %v", err),
+			ErrorMessage: "no valid upstream URL found",
 		}, nil
 	}
 
-	// 只使用 host 部分（不含端口），避免因端口不同导致匹配失败
-	host := parsedURL.Hostname()
-
-	// 查找对应的处理器
-	handler, ok := platformHandlers[host]
+	// 查找对应的处理器，未匹配到专用处理器时使用默认处理器
+	handler, ok := platformHandlers[selectedHost]
 	if !ok {
-		// 如果没有找到特定处理器，使用默认处理器
 		handler = platformHandlers["default"]
 	}
 
 	// 使用对应的处理器查询余额
 	customPath := group.BalanceQueryPath
-	return handler(ctx, upstreamURL, apiKey.KeyValue, customPath)
+	return handler(ctx, selectedURL, apiKey.KeyValue, customPath)
 }
 
-// getUpstreamURLFromGroup 从分组的 Upstreams JSON 配置中提取第一个有效的上游 URL
-func getUpstreamURLFromGroup(upstreams datatypes.JSON) (string, error) {
-	if len(upstreams) == 0 {
-		return "", fmt.Errorf("no upstreams configured")
-	}
+// upstreamDef 表示分组上游配置项
+type upstreamDef struct {
+	URL    string `json:"url"`
+	Weight int    `json:"weight"`
+}
 
-	type upstreamDef struct {
-		URL    string `json:"url"`
-		Weight int    `json:"weight"`
+// getUpstreamURLsFromGroup 返回所有有效的上游 URL（用于多上游场景）
+func getUpstreamURLsFromGroup(upstreams datatypes.JSON) ([]string, error) {
+	if len(upstreams) == 0 {
+		return nil, fmt.Errorf("no upstreams configured")
 	}
 
 	var defs []upstreamDef
 	if err := json.Unmarshal(upstreams, &defs); err != nil {
-		return "", fmt.Errorf("failed to unmarshal upstreams: %w", err)
+		return nil, fmt.Errorf("failed to unmarshal upstreams: %w", err)
 	}
 
-	// 优先选择 weight > 0 的上游
-	for _, def := range defs {
-		if def.Weight > 0 && def.URL != "" {
-			return def.URL, nil
-		}
-	}
-
-	// 如果没有 weight > 0 的，返回第一个有 URL 的
+	var urls []string
 	for _, def := range defs {
 		if def.URL != "" {
-			return def.URL, nil
+			urls = append(urls, def.URL)
 		}
 	}
 
-	return "", fmt.Errorf("no valid upstream URL found")
+	if len(urls) == 0 {
+		return nil, fmt.Errorf("no valid upstream URL found")
+	}
+	return urls, nil
 }
 
 // handleDefaultBalance 默认余额查询处理器（尝试标准 OpenAI 格式）

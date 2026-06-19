@@ -1,6 +1,7 @@
 package models
 
 import (
+	"encoding/json"
 	"gpt-load/internal/failover"
 	"gpt-load/internal/types"
 	"time"
@@ -62,7 +63,8 @@ type GroupConfig struct {
 	// 通知配置
 	InvalidKeyCountThreshold *int `json:"invalid_key_count_threshold,omitempty"` // 无效密钥数量阈值，超过此数量时发送通知
 	// 余额查询配置
-	EnableBalanceQuery *bool `json:"enable_balance_query,omitempty"` // 是否启用余额查询
+	EnableBalanceQuery          *bool `json:"enable_balance_query,omitempty"`          // 是否启用余额查询
+	BalanceQueryIntervalMinutes *int  `json:"balance_query_interval_minutes,omitempty"` // 余额查询间隔（分钟），覆盖全局配置
 }
 
 // HeaderRule 定义头部操作的单条规则
@@ -142,8 +144,28 @@ type Group struct {
 }
 
 // ShouldQueryBalance 判断是否应该查询余额
+// 同时检查上游 URL 是否有效
 func (g *Group) ShouldQueryBalance() bool {
-	return g.EnableBalanceQuery
+	if !g.EnableBalanceQuery {
+		return false
+	}
+	// 检查是否有有效的上游 URL
+	if len(g.Upstreams) == 0 {
+		return false
+	}
+	var defs []struct {
+		URL    string `json:"url"`
+		Weight int    `json:"weight"`
+	}
+	if err := json.Unmarshal(g.Upstreams, &defs); err != nil {
+		return false
+	}
+	for _, def := range defs {
+		if def.URL != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // APIKey 对应 api_keys 表

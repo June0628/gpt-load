@@ -13,12 +13,19 @@ import (
 	"gorm.io/gorm"
 )
 
+// BalanceQueryLocker 定义余额查询互斥锁接口，防止手动查询与定时查询竞态
+type BalanceQueryLocker interface {
+	TryAcquireBalanceQueryLock(groupID uint) bool
+	ReleaseBalanceQueryLock(groupID uint)
+}
+
 // CronChecker 负责定期验证无效密钥
 type CronChecker struct {
 	DB              *gorm.DB
 	SettingsManager *config.SystemSettingsManager
 	Validator       *KeyValidator
 	EncryptionSvc   encryption.Service
+	balanceLocker   BalanceQueryLocker
 	stopChan        chan struct{}
 	wg              sync.WaitGroup
 }
@@ -37,6 +44,11 @@ func NewCronChecker(
 		EncryptionSvc:   encryptionSvc,
 		stopChan:        make(chan struct{}),
 	}
+}
+
+// SetBalanceQueryLocker 注入余额查询互斥锁，用于防止手动查询与定时查询竞态
+func (s *CronChecker) SetBalanceQueryLocker(locker BalanceQueryLocker) {
+	s.balanceLocker = locker
 }
 
 // Start 开始执行定时任务
@@ -88,6 +100,7 @@ func (s *CronChecker) runLoop() {
 
 // forEachGroup 加载非聚合分组并并发执行给定函数，基于配置的间隔判断是否需要处理
 // useBalanceTimestamp: true 表示使用 LastBalanceQueriedAt 判断，false 表示使用 LastValidatedAt。
+// 余额查询使用独立间隔配置
 func (s *CronChecker) forEachGroup(actionName string, useBalanceTimestamp bool, fn func(group *models.Group)) {
 	var groups []models.Group
 	if err := s.DB.Where("group_type != ? OR group_type IS NULL", "aggregate").Find(&groups).Error; err != nil {
@@ -105,7 +118,19 @@ func (s *CronChecker) forEachGroup(actionName string, useBalanceTimestamp bool, 
 	for i := range groups {
 		group := &groups[i]
 		group.EffectiveConfig = s.SettingsManager.GetEffectiveConfig(group.Config)
-		interval := time.Duration(group.EffectiveConfig.KeyValidationIntervalMinutes) * time.Minute
+
+		// 余额查询使用独立间隔配置
+		var interval time.Duration
+		if useBalanceTimestamp {
+			// 优先使用分组级别的余额查询间隔，其次使用全局配置
+			intervalMinutes := group.EffectiveConfig.BalanceQueryIntervalMinutes
+			if intervalMinutes <= 0 {
+				intervalMinutes = group.EffectiveConfig.KeyValidationIntervalMinutes
+			}
+			interval = time.Duration(intervalMinutes) * time.Minute
+		} else {
+			interval = time.Duration(group.EffectiveConfig.KeyValidationIntervalMinutes) * time.Minute
+		}
 
 		var lastProcessedAt *time.Time
 		if useBalanceTimestamp {
@@ -130,17 +155,15 @@ func (s *CronChecker) forEachGroup(actionName string, useBalanceTimestamp bool, 
 }
 
 // decryptKeyForUse 解密密钥并返回仅包含处理所需字段的新结构体，避免修改原始数据，消除隐式副作用
+// decryptKeyForUse 复制完整密钥对象并替换为解密后的 KeyValue，避免后续使用零值
 func (s *CronChecker) decryptKeyForUse(key *models.APIKey) (*models.APIKey, error) {
 	decryptedKey, err := s.EncryptionSvc.Decrypt(key.KeyValue)
 	if err != nil {
 		return nil, err
 	}
-	return &models.APIKey{
-		ID:       key.ID,
-		KeyValue: decryptedKey,
-		GroupID:  key.GroupID,
-		Status:   key.Status,
-	}, nil
+	keyForUse := *key
+	keyForUse.KeyValue = decryptedKey
+	return &keyForUse, nil
 }
 
 // updateGroupTimestamp 更新分组的时间戳列
@@ -277,12 +300,23 @@ func (s *CronChecker) validateGroupKeys(group *models.Group) {
 }
 
 // submitBalanceQueryJobs 查找启用余额查询的分组并查询余额
-// 复用KeyValidationIntervalMinutes配置作为余额查询间隔
+// 使用独立余额查询间隔并加锁防止与手动查询竞态
 func (s *CronChecker) submitBalanceQueryJobs() {
 	s.forEachGroup("balance", true, func(group *models.Group) {
-		if group.ShouldQueryBalance() {
-			s.queryGroupBalances(group)
+		if !group.ShouldQueryBalance() {
+			return
 		}
+		// 定时查询获取锁，避免与手动查询同时发起
+		if s.balanceLocker != nil && !s.balanceLocker.TryAcquireBalanceQueryLock(group.ID) {
+			logrus.Debugf("CronChecker[balance]: group '%s' 正在被手动查询，跳过本次定时查询", group.Name)
+			return
+		}
+		defer func() {
+			if s.balanceLocker != nil {
+				s.balanceLocker.ReleaseBalanceQueryLock(group.ID)
+			}
+		}()
+		s.queryGroupBalances(group)
 	})
 }
 
@@ -310,19 +344,32 @@ func (s *CronChecker) queryGroupBalances(group *models.Group) {
 	rateLimiter := time.NewTicker(rateLimitDelay)
 	defer rateLimiter.Stop()
 
+	// 防御性检查：余额查询依赖未导出字段，若未注入则跳过避免 panic
+	if s.Validator == nil || s.Validator.balanceService == nil || s.Validator.keypoolProvider == nil {
+		logrus.Errorf("CronChecker[balance]: validator/balanceService/keypoolProvider 未初始化，跳过分组 %s", group.Name)
+		return
+	}
+
 	successCount := s.runWorkerPool(
 		activeKeys,
 		group.EffectiveConfig.KeyValidationConcurrency,
 		"balance",
 		func(key *models.APIKey) bool {
-			balanceInfo, err := s.Validator.balanceService.QueryBalance(context.Background(), group, key)
+			// 余额查询加超时，避免单个请求无限阻塞
+			ctx, cancel := context.WithTimeout(context.Background(), time.Duration(group.EffectiveConfig.KeyValidationTimeoutSeconds)*time.Second)
+			balanceInfo, err := s.Validator.balanceService.QueryBalance(ctx, group, key)
+			cancel()
 			if err != nil {
 				logrus.WithError(err).WithField("key_id", key.ID).Debug("CronChecker[balance]: balance query failed")
 				return false
 			}
 
 			if balanceInfo != nil && balanceInfo.Success {
-				s.Validator.keypoolProvider.UpdateBalance(key, group, balanceInfo)
+				// 同步更新余额，失败时记录错误
+				if updateErr := s.Validator.keypoolProvider.UpdateBalanceSync(key, group, balanceInfo); updateErr != nil {
+					logrus.WithError(updateErr).WithField("key_id", key.ID).Error("CronChecker[balance]: 余额更新失败")
+					return false
+				}
 				logrus.WithFields(logrus.Fields{
 					"key_id":  key.ID,
 					"balance": balanceInfo.BalanceTotal,

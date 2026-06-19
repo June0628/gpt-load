@@ -89,13 +89,19 @@ func (s *KeyValidator) ValidateSingleKey(key *models.APIKey, group *models.Group
 				"error":    err,
 			}).Debug("Balance query failed")
 		} else if balanceInfo != nil && balanceInfo.Success {
-			// 更新密钥的余额信息
-			s.keypoolProvider.UpdateBalance(key, group, balanceInfo)
-			logrus.WithFields(logrus.Fields{
-				"key_id":   key.ID,
-				"group_id": group.ID,
-				"balance":  balanceInfo.BalanceTotal,
-			}).Debug("Balance queried and updated successfully")
+			// 同步更新余额，失败时记录错误
+			if updateErr := s.keypoolProvider.UpdateBalanceSync(key, group, balanceInfo); updateErr != nil {
+				logrus.WithError(updateErr).WithFields(logrus.Fields{
+					"key_id":   key.ID,
+					"group_id": group.ID,
+				}).Error("Balance update failed")
+			} else {
+				logrus.WithFields(logrus.Fields{
+					"key_id":   key.ID,
+					"group_id": group.ID,
+					"balance":  balanceInfo.BalanceTotal,
+				}).Debug("Balance queried and updated successfully")
+			}
 		}
 	}
 

@@ -57,6 +57,8 @@ type SystemSettings struct {
 	KeyValidationIntervalMinutes int    `json:"key_validation_interval_minutes" default:"60" name:"config.key_validation_interval" category:"config.category.key" desc:"config.key_validation_interval_desc" validate:"required,min=1"`
 	KeyValidationConcurrency     int    `json:"key_validation_concurrency" default:"10" name:"config.key_validation_concurrency" category:"config.category.key" desc:"config.key_validation_concurrency_desc" validate:"required,min=1"`
 	KeyValidationTimeoutSeconds  int    `json:"key_validation_timeout_seconds" default:"20" name:"config.key_validation_timeout" category:"config.category.key" desc:"config.key_validation_timeout_desc" validate:"required,min=1"`
+	// 余额查询独立间隔配置
+	BalanceQueryIntervalMinutes  int    `json:"balance_query_interval_minutes" default:"60" name:"config.balance_query_interval" category:"config.category.key" desc:"config.balance_query_interval_desc" validate:"required,min=1"`
 
 	// 通知配置
 	InvalidKeyCountThreshold int `json:"invalid_key_count_threshold" default:"0" name:"config.invalid_key_count_threshold" category:"config.category.key" desc:"config.invalid_key_count_threshold_desc" validate:"min=0"`

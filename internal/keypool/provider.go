@@ -21,6 +21,9 @@ import (
 // asyncSemaphore 限制异步操作的最大并发 goroutine 数量，防止流量高峰期出现 goroutine 风暴
 var asyncSemaphore = make(chan struct{}, 100)
 
+// syncSemaphore 限制同步余额更新操作的并发，与异步信号量隔离避免相互阻塞
+var syncSemaphore = make(chan struct{}, 50)
+
 type KeyProvider struct {
 	db                *gorm.DB
 	store             store.Store
@@ -814,46 +817,60 @@ func pluckIDs(keys []models.APIKey) []uint {
 	return ids
 }
 
-// UpdateBalance 更新密钥的余额信息到数据库和缓存
-func (p *KeyProvider) UpdateBalance(apiKey *models.APIKey, group *models.Group, balanceInfo *models.BalanceInfo) {
-	go func() {
-		asyncSemaphore <- struct{}{}        // 获取信号量
-		defer func() { <-asyncSemaphore }() // 释放信号量
-		keyHashKey := fmt.Sprintf("key:%d", apiKey.ID)
+// UpdateBalanceSync 同步更新密钥的余额信息到数据库和缓存，返回错误供调用方感知
+func (p *KeyProvider) UpdateBalanceSync(apiKey *models.APIKey, group *models.Group, balanceInfo *models.BalanceInfo) error {
+	syncSemaphore <- struct{}{}        // 获取同步信号量（与异步信号量隔离）
+	defer func() { <-syncSemaphore }() // 释放信号量
+	keyHashKey := fmt.Sprintf("key:%d", apiKey.ID)
 
-		// 更新数据库
-		updates := map[string]any{
-			"balance_total":  balanceInfo.BalanceTotal,
-			"balance_used":   balanceInfo.BalanceUsed,
-			"balance_status": balanceInfo.Status,
-		}
+	// 更新数据库
+	updates := map[string]any{
+		"balance_total":  balanceInfo.BalanceTotal,
+		"balance_used":   balanceInfo.BalanceUsed,
+		"balance_status": balanceInfo.Status,
+	}
 
-		if err := p.db.Model(apiKey).Updates(updates).Error; err != nil {
-			logrus.WithFields(logrus.Fields{
-				"key_id": apiKey.ID,
-				"error":  err,
-			}).Error("Failed to update key balance in database")
-		}
-
-		// 更新缓存
-		if err := p.store.HSet(keyHashKey, map[string]any{
-			"balance_total":  balanceInfo.BalanceTotal,
-			"balance_used":   balanceInfo.BalanceUsed,
-			"balance_status": balanceInfo.Status,
-		}); err != nil {
-			logrus.WithFields(logrus.Fields{
-				"key_id": apiKey.ID,
-				"error":  err,
-			}).Error("Failed to update key balance in store")
-		}
-
+	if err := p.db.Model(apiKey).Updates(updates).Error; err != nil {
 		logrus.WithFields(logrus.Fields{
-			"key_id":        apiKey.ID,
-			"group_id":      group.ID,
-			"balance_total": balanceInfo.BalanceTotal,
-			"balance_used":  balanceInfo.BalanceUsed,
-		}).Debug("Key balance updated successfully")
-	}()
+			"key_id": apiKey.ID,
+			"error":  err,
+		}).Error("Failed to update key balance in database")
+		return fmt.Errorf("update balance in db: %w", err)
+	}
+
+	// 更新缓存，失败时重试最多 3 次
+	cacheUpdates := map[string]any{
+		"balance_total":  balanceInfo.BalanceTotal,
+		"balance_used":   balanceInfo.BalanceUsed,
+		"balance_status": balanceInfo.Status,
+	}
+	var cacheErr error
+	for i := 0; i < 3; i++ {
+		if err := p.store.HSet(keyHashKey, cacheUpdates); err != nil {
+			cacheErr = err
+			logrus.WithFields(logrus.Fields{
+				"key_id": apiKey.ID,
+				"error":  err,
+				"retry":  i + 1,
+			}).Warn("Failed to update key balance in store, retrying")
+			time.Sleep(time.Duration(50*(i+1)) * time.Millisecond)
+			continue
+		}
+		cacheErr = nil
+		break
+	}
+	if cacheErr != nil {
+		logrus.WithError(cacheErr).WithField("key_id", apiKey.ID).Error("Failed to update key balance in store after retries")
+		return fmt.Errorf("update balance in store: %w", cacheErr)
+	}
+
+	logrus.WithFields(logrus.Fields{
+		"key_id":        apiKey.ID,
+		"group_id":      group.ID,
+		"balance_total": balanceInfo.BalanceTotal,
+		"balance_used":  balanceInfo.BalanceUsed,
+	}).Debug("Key balance updated successfully")
+	return nil
 }
 
 // IncrementDailyRequestCount 增加密钥的每日请求计数，并在达到限制时禁用密钥。

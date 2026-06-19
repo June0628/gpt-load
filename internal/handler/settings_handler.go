@@ -10,9 +10,11 @@ import (
 	"gpt-load/internal/i18n"
 	"gpt-load/internal/models"
 	"gpt-load/internal/response"
+	"gpt-load/internal/services"
 	"gpt-load/internal/utils"
 
 	"github.com/gin-gonic/gin"
+	"github.com/sirupsen/logrus"
 )
 
 // GetSettings 处理 GET /api/settings 请求，获取所有系统设置并按类别分组返回。
@@ -192,18 +194,30 @@ func (s *Server) ManualUploadLogTable(c *gin.Context) {
 	}
 
 	// 如果启用了手动上传后自动删除，使用原子性的上传+删除操作防止并发竞态
+	// 手动上传支持事后验证，空表跳过不视为失败
 	settings := s.SettingsManager.GetSettings()
 	deleted := false
 	if settings.LogUploadDeleteAfterManual {
 		if err := s.LogUploadService.UploadAndDeleteTable(tableName); err != nil {
-			response.Error(c, app_errors.NewAPIError(app_errors.ErrDatabase, i18n.Message(c, "log_backup.upload_failed")+": "+err.Error()))
+			// 空表跳过是正常情况，不视为错误
+			if err == services.ErrEmptyTableSkipped {
+				response.SuccessI18n(c, "log_backup.table_empty", nil)
+				return
+			}
+			logrus.WithError(err).WithField("table", tableName).Error("Manual log upload failed")
+			response.ErrorI18n(c, http.StatusInternalServerError, "DATABASE_ERROR", "log_backup.upload_failed")
 			return
 		}
 		deleted = true
 	} else {
 		// 仅上传，不删除
 		if err := s.LogUploadService.UploadTable(tableName); err != nil {
-			response.Error(c, app_errors.NewAPIError(app_errors.ErrDatabase, i18n.Message(c, "log_backup.upload_failed")+": "+err.Error()))
+			if err == services.ErrEmptyTableSkipped {
+				response.SuccessI18n(c, "log_backup.table_empty", nil)
+				return
+			}
+			logrus.WithError(err).WithField("table", tableName).Error("Manual log upload failed")
+			response.ErrorI18n(c, http.StatusInternalServerError, "DATABASE_ERROR", "log_backup.upload_failed")
 			return
 		}
 	}
@@ -222,7 +236,10 @@ func (s *Server) ManualUploadLogTable(c *gin.Context) {
 		} else {
 			content += "- **操作**: 仅上传\n"
 		}
-		_ = utils.SendFeishuWebhook(webhookURL, title, content)
+		// 通知失败时记录日志
+		if err := utils.SendFeishuWebhook(webhookURL, title, content); err != nil {
+			logrus.WithError(err).WithField("table", tableName).Error("Failed to send manual upload notification via Feishu webhook")
+		}
 	}()
 
 	// 根据实际操作返回不同的成功消息

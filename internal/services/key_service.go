@@ -10,6 +10,9 @@ import (
 	"io"
 	"regexp"
 	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
@@ -50,6 +53,9 @@ type KeyService struct {
 	KeyProvider   *keypool.KeyProvider
 	KeyValidator  *keypool.KeyValidator
 	EncryptionSvc encryption.Service
+
+	// 余额查询互斥锁，按分组去重
+	balanceQueryLocks sync.Map
 }
 
 // NewKeyService 创建新的 KeyService
@@ -377,7 +383,20 @@ func (s *KeyService) StreamKeysToWriter(groupID uint, statusFilter string, write
 	return err
 }
 
-// QueryGroupBalances 查询分组内所有活跃密钥的余额
+// TryAcquireBalanceQueryLock 尝试获取指定分组的余额查询锁，成功返回 true
+// 防止手动查询与定时查询竞态
+func (s *KeyService) TryAcquireBalanceQueryLock(groupID uint) bool {
+	_, loaded := s.balanceQueryLocks.LoadOrStore(groupID, struct{}{})
+	return !loaded
+}
+
+// ReleaseBalanceQueryLock 释放指定分组的余额查询锁
+func (s *KeyService) ReleaseBalanceQueryLock(groupID uint) {
+	s.balanceQueryLocks.Delete(groupID)
+}
+
+// QueryGroupBalances 查询分组内所有活跃密钥的余额（手动触发）
+// 修复：使用 worker pool + 限流，与定时查询保持一致，避免上游限流
 func (s *KeyService) QueryGroupBalances(group *models.Group) {
 	var activeKeys []models.APIKey
 	if err := s.DB.Where("group_id = ? AND status = ?", group.ID, models.KeyStatusActive).Find(&activeKeys).Error; err != nil {
@@ -405,38 +424,90 @@ func (s *KeyService) QueryGroupBalances(group *models.Group) {
 		return
 	}
 
-	successCount := 0
-	for i := range activeKeys {
-		key := &activeKeys[i]
-		// 解密密钥值，因为数据库中的 KeyValue 是加密存储的
-		decryptedKey, decryptErr := s.EncryptionSvc.Decrypt(key.KeyValue)
-		if decryptErr != nil {
-			logrus.WithError(decryptErr).WithField("key_id", key.ID).Warn("解密密钥失败，跳过余额查询")
-			continue
-		}
-		// 创建临时密钥对象，使用解密后的值
-		queryKey := *key
-		queryKey.KeyValue = decryptedKey
-		balanceInfo, err := balanceService.QueryBalance(context.Background(), group, &queryKey)
-		if err != nil {
-			logrus.WithError(err).WithField("key_id", key.ID).Debug("余额查询失败")
-			continue
-		}
+	// 使用 worker pool + 限流，避免上游限流
+	concurrency := 5
+	if group.EffectiveConfig.KeyValidationConcurrency > 0 {
+		concurrency = group.EffectiveConfig.KeyValidationConcurrency
+	}
 
-		if balanceInfo != nil && balanceInfo.Success {
-			s.KeyProvider.UpdateBalance(key, group, balanceInfo)
-			successCount++
-			logrus.WithFields(logrus.Fields{
-				"key_id":  key.ID,
-				"balance": balanceInfo.BalanceTotal,
-			}).Debug("余额查询成功")
-		} else if balanceInfo != nil {
-			logrus.WithFields(logrus.Fields{
-				"key_id": key.ID,
-				"error":  balanceInfo.ErrorMessage,
-			}).Warn("余额查询返回失败")
+	// 手动查询支持取消：通过 ctx 在需要时中断限流等待和查询
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	rateLimitDelay := 200 * time.Millisecond
+	rateLimiter := time.NewTicker(rateLimitDelay)
+	defer rateLimiter.Stop()
+
+	// 每个请求的超时时间
+	timeoutSeconds := 20
+	if group.EffectiveConfig.KeyValidationTimeoutSeconds > 0 {
+		timeoutSeconds = group.EffectiveConfig.KeyValidationTimeoutSeconds
+	}
+
+	var successCount int32
+	var wg sync.WaitGroup
+	jobs := make(chan *models.APIKey, len(activeKeys))
+
+	for i := 0; i < concurrency; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for key := range jobs {
+				// 限流，同时支持取消
+				select {
+				case <-rateLimiter.C:
+				case <-ctx.Done():
+					return
+				}
+
+				// 解密密钥值
+				decryptedKey, decryptErr := s.EncryptionSvc.Decrypt(key.KeyValue)
+				if decryptErr != nil {
+					logrus.WithError(decryptErr).WithField("key_id", key.ID).Warn("解密密钥失败，跳过余额查询")
+					continue
+				}
+				queryKey := *key
+				queryKey.KeyValue = decryptedKey
+
+				// 余额查询加超时，避免单个请求无限阻塞
+				queryCtx, queryCancel := context.WithTimeout(ctx, time.Duration(timeoutSeconds)*time.Second)
+				balanceInfo, err := balanceService.QueryBalance(queryCtx, group, &queryKey)
+				queryCancel()
+				if err != nil {
+					logrus.WithError(err).WithField("key_id", key.ID).Debug("余额查询失败")
+					continue
+				}
+
+				if balanceInfo != nil && balanceInfo.Success {
+					// 同步更新余额，确保错误可被感知
+					if updateErr := s.KeyProvider.UpdateBalanceSync(key, group, balanceInfo); updateErr != nil {
+						logrus.WithError(updateErr).WithField("key_id", key.ID).Error("余额更新失败")
+						continue
+					}
+					atomic.AddInt32(&successCount, 1)
+					logrus.WithFields(logrus.Fields{
+						"key_id":  key.ID,
+						"balance": balanceInfo.BalanceTotal,
+					}).Debug("余额查询成功")
+				} else if balanceInfo != nil {
+					logrus.WithFields(logrus.Fields{
+						"key_id": key.ID,
+						"error":  balanceInfo.ErrorMessage,
+					}).Warn("余额查询返回失败")
+				}
+			}
+		}()
+	}
+
+	for i := range activeKeys {
+		select {
+		case jobs <- &activeKeys[i]:
+		case <-ctx.Done():
+			break
 		}
 	}
+	close(jobs)
+	wg.Wait()
 
 	logrus.Infof("分组 %s 余额查询完成，成功: %d/%d", group.Name, successCount, len(activeKeys))
 }

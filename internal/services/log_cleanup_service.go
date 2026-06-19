@@ -105,7 +105,8 @@ func (s *LogCleanupService) cleanupExpiredLogs() {
 	// 语义陷阱提醒：用户开启了 LogUploadEnabled 但未开启 LogUploadBeforeDelete，
 	// 此时过期日志表将被直接删除而不上传，存在数据丢失风险。
 	if settings.LogUploadEnabled && !settings.LogUploadBeforeDelete {
-		logrus.Warn("LogUploadEnabled=true 但 LogUploadBeforeDelete=false，过期日志表将被直接删除而不上传备份（如需备份请同时启用 LogUploadBeforeDelete）")
+		logrus.Warn("LogUploadEnabled=true but LogUploadBeforeDelete=false, expired log tables will be deleted without backup upload")
+		s.sendDeleteWithoutUploadNotification(tablesToDelete)
 	}
 
 	var failedTables []string
@@ -125,12 +126,18 @@ func (s *LogCleanupService) cleanupExpiredLogs() {
 		// 如果启用了删除前上传，先执行上传
 		if needUploadBeforeDelete {
 			if err := s.uploadService.UploadTable(tableName); err != nil {
-				logrus.WithError(err).WithField("table", tableName).Error("Failed to upload table before deletion, skipping deletion to prevent data loss")
-				failedTables = append(failedTables, tableName)
-				failedErrors = append(failedErrors, err.Error())
-				continue // 上传失败则跳过该表的删除，防止数据丢失
+				// 空表跳过上传是安全的，可以继续删除
+				if err == ErrEmptyTableSkipped {
+					logrus.WithField("table", tableName).Info("Table is empty, safe to delete without upload")
+				} else {
+					logrus.WithError(err).WithField("table", tableName).Error("Failed to upload table before deletion, skipping deletion to prevent data loss")
+					failedTables = append(failedTables, tableName)
+					failedErrors = append(failedErrors, err.Error())
+					continue
+				}
+			} else {
+				logrus.WithField("table", tableName).Info("Successfully uploaded table before deletion")
 			}
-			logrus.WithField("table", tableName).Info("Successfully uploaded table before deletion")
 		}
 
 		// 删除表
@@ -196,5 +203,31 @@ func (s *LogCleanupService) sendUploadFailureNotification(failedTables []string,
 
 	if err := utils.SendFeishuWebhook(webhookURL, title, content); err != nil {
 		logrus.WithError(err).Error("Failed to send log upload failure notification via Feishu webhook")
+	}
+}
+
+// sendDeleteWithoutUploadNotification sends a Feishu notification when expired log tables
+// are deleted without being uploaded first (LogUploadBeforeDelete=false).
+// Fix #4: avoid silent data loss when LogUploadEnabled=true but LogUploadBeforeDelete=false.
+func (s *LogCleanupService) sendDeleteWithoutUploadNotification(tablesToDelete []string) {
+	settings := s.settingsManager.GetSettings()
+	webhookURL := settings.FeishuWebhookURL
+
+	if webhookURL == "" {
+		return
+	}
+
+	title := "⚠️ GPT-Load log cleanup notice (delete without backup)"
+	content := fmt.Sprintf("**Expired log tables will be deleted without backup upload**\n\n"+
+		"LogUploadEnabled=true but LogUploadBeforeDelete=false. The following %d expired log table(s) will be deleted without being uploaded first:\n\n", len(tablesToDelete))
+
+	for _, table := range tablesToDelete {
+		content += fmt.Sprintf("- `%s`\n", table)
+	}
+
+	content += "\nTo upload backups before deletion, enable `LogUploadBeforeDelete` in settings."
+
+	if err := utils.SendFeishuWebhook(webhookURL, title, content); err != nil {
+		logrus.WithError(err).Error("Failed to send delete-without-upload notification via Feishu webhook")
 	}
 }
