@@ -1,11 +1,3 @@
-# 更新日志（待提交）
-
-本次更新涉及 **22 个文件**，主要包含日志增强、并发优化、密钥稳定性及国际化。
-
----
-
-## 主要变更
-
 ### 1. 新增日志字段 🗃️
 
 - 为所有日志分表补充 `tool_calls` 和 `response_body` 列
@@ -38,19 +30,3 @@
 
 - `models/types.go`: 请求日志模型新增 `ToolCalls` 和 `ResponseBody`
 - `gemini_channel.go`: 通道配置过期判断逻辑调整
-
----
-
-## 新增文件
-
-- `internal/db/migrations/v1_8_0_AddToolCallsAndResponseBodyColumns.go`
-
----
-
-## 提交命令
-
-```bash
-git add -A
-git commit -m "feat: add tool_calls/response_body log fields, optimize concurrency and key management"
-git push myfork
-```
