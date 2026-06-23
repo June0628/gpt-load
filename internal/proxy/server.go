@@ -127,6 +127,9 @@ func (ps *ProxyServer) executeRequestWithRetry(
 ) {
 	cfg := group.EffectiveConfig
 	maxRetries := cfg.MaxRetries
+	if maxRetries < 0 {
+		maxRetries = 0
+	}
 
 	// 获取模型名称（用于魔塔平台模型维度限流）
 	modelName := ""
@@ -153,19 +156,23 @@ func (ps *ProxyServer) executeRequestWithRetry(
 		if err != nil {
 			logrus.Errorf("Failed to select a key for group %s on attempt %d: %v", group.Name, retryCount+1, err)
 			response.Error(c, app_errors.NewAPIError(app_errors.ErrNoKeysAvailable, err.Error()))
-			ps.logRequest(c, originalGroup, group, nil, startTime, http.StatusServiceUnavailable, err, isStream, "", channelHandler, bodyBytes, models.RequestTypeFinal)
+			ps.logRequest(c, originalGroup, group, nil, startTime, http.StatusServiceUnavailable, err, isStream, "", channelHandler, bodyBytes, models.RequestTypeFinal, "")
 			return
 		}
 
 		// 检查密钥是否已达到每日请求限制
 		if ps.keyProvider.CheckDailyRequestLimit(apiKey, group) {
 			// 密钥已达每日限制，循环重试选择下一个密钥
+			logrus.WithFields(logrus.Fields{
+				"group": group.Name,
+				"keyID": apiKey.ID,
+			}).Debug("Key reached daily request limit, trying next key")
 			if retryCount < maxRetries {
 				continue
 			}
 			logrus.Errorf("All keys in group %s have reached daily request limit", group.Name)
 			response.Error(c, app_errors.NewAPIError(app_errors.ErrNoKeysAvailable, "所有密钥已达到每日请求限制"))
-			ps.logRequest(c, originalGroup, group, nil, startTime, http.StatusServiceUnavailable, errors.New("daily request limit reached"), isStream, "", channelHandler, bodyBytes, models.RequestTypeFinal)
+			ps.logRequest(c, originalGroup, group, nil, startTime, http.StatusServiceUnavailable, errors.New("daily request limit reached"), isStream, "", channelHandler, bodyBytes, models.RequestTypeFinal, "")
 			return
 		}
 
@@ -214,7 +221,7 @@ func (ps *ProxyServer) executeRequestWithRetry(
 		if err != nil {
 			cancel()
 			response.Error(c, app_errors.NewAPIError(app_errors.ErrBadRequest, err.Error()))
-			ps.logRequest(c, originalGroup, group, apiKey, startTime, http.StatusBadRequest, err, isStream, upstreamURL, channelHandler, bodyBytes, models.RequestTypeFinal)
+			ps.logRequest(c, originalGroup, group, apiKey, startTime, http.StatusBadRequest, err, isStream, upstreamURL, channelHandler, bodyBytes, models.RequestTypeFinal, "")
 			return
 		}
 
@@ -251,7 +258,7 @@ func (ps *ProxyServer) executeRequestWithRetry(
 					resp.Body.Close()
 				}
 				logrus.Debugf("Client-side ignorable error for key %s, aborting retries: %v", utils.MaskAPIKey(apiKey.KeyValue), err)
-				ps.logRequest(c, originalGroup, group, apiKey, startTime, 499, err, isStream, upstreamURL, channelHandler, bodyBytes, models.RequestTypeFinal)
+				ps.logRequest(c, originalGroup, group, apiKey, startTime, 499, err, isStream, upstreamURL, channelHandler, bodyBytes, models.RequestTypeFinal, "")
 				return
 			}
 
@@ -259,12 +266,16 @@ func (ps *ProxyServer) executeRequestWithRetry(
 			var errorMessage string
 			var parsedError string
 
-			if err != nil {
-				statusCode = 500
-				errorMessage = err.Error()
-				parsedError = errorMessage
-				logrus.Debugf("Request failed (attempt %d/%d) for key %s: %v", retryCount+1, maxRetries+1, utils.MaskAPIKey(apiKey.KeyValue), err)
-			} else {
+		if err != nil {
+			// client.Do 返回非 nil err 时仍可能返回非 nil resp（如重定向错误），需关闭 Body 避免 TCP 连接无法复用
+			if resp != nil {
+				resp.Body.Close()
+			}
+			statusCode = 500
+			errorMessage = err.Error()
+			parsedError = errorMessage
+			logrus.Debugf("Request failed (attempt %d/%d) for key %s: %v", retryCount+1, maxRetries+1, utils.MaskAPIKey(apiKey.KeyValue), err)
+		} else {
 				// 可重试的上游响应（HTTP状态码匹配故障转移策略）
 				statusCode = resp.StatusCode
 				errorBody, readErr := io.ReadAll(resp.Body)
@@ -317,7 +328,7 @@ func (ps *ProxyServer) executeRequestWithRetry(
 				requestType = models.RequestTypeFinal
 			}
 
-			ps.logRequest(c, originalGroup, group, apiKey, startTime, statusCode, errors.New(parsedError), isStream, upstreamURL, channelHandler, bodyBytes, requestType)
+			ps.logRequest(c, originalGroup, group, apiKey, startTime, statusCode, errors.New(parsedError), isStream, upstreamURL, channelHandler, bodyBytes, requestType, "")
 
 			// 如果是最后一次尝试，直接返回错误
 			if isLastAttempt {
@@ -336,8 +347,7 @@ func (ps *ProxyServer) executeRequestWithRetry(
 		}
 
 		// 成功：此处 resp 保证非空（shouldRetryByStatus 已检查 resp != nil）
-		// 注意：resp.Body 必须由下游 handler 读取后再关闭，不能在这里关闭
-		defer resp.Body.Close()
+		// 注意：resp.Body 由各 handler 自行关闭，避免双重关闭
 
 		logrus.Debugf("Request for group %s succeeded on attempt %d with key %s", group.Name, retryCount+1, utils.MaskAPIKey(apiKey.KeyValue))
 
@@ -351,6 +361,7 @@ func (ps *ProxyServer) executeRequestWithRetry(
 			}
 		}
 
+		var responseBody string
 		// 检查是否为模型列表请求（需要特殊处理）
 		if shouldInterceptModelList(c.Request.URL.Path, c.Request.Method) {
 			defer cancel()
@@ -367,15 +378,15 @@ func (ps *ProxyServer) executeRequestWithRetry(
 				// 流式请求：不提前 cancel，让 context 随客户端连接生命周期自然结束
 				// 否则 HTTP/2 下会截断流
 				// 注意：c.Request.Context() 会在客户端断开时自动取消，不会泄露
-				ps.handleStreamingResponse(c, resp)
+				responseBody = ps.handleStreamingResponse(c, resp)
 				cancel() // 流结束后显式 cancel，消除 go vet 警告
 			} else {
 				defer cancel()
-				ps.handleNormalResponse(c, resp)
+				responseBody = ps.handleNormalResponse(c, resp)
 			}
 		}
 
-		ps.logRequest(c, originalGroup, group, apiKey, startTime, resp.StatusCode, nil, isStream, upstreamURL, channelHandler, bodyBytes, models.RequestTypeFinal)
+		ps.logRequest(c, originalGroup, group, apiKey, startTime, resp.StatusCode, nil, isStream, upstreamURL, channelHandler, bodyBytes, models.RequestTypeFinal, responseBody)
 		return
 	}
 }
@@ -401,12 +412,13 @@ func (ps *ProxyServer) logRequest(
 	channelHandler channel.ChannelProxy,
 	bodyBytes []byte,
 	requestType string,
+	responseBody string,
 ) {
 	if ps.requestLogService == nil {
 		return
 	}
 
-	var requestBodyToLog, userAgent, agentFilesToLog string
+	var requestBodyToLog, userAgent, agentFilesToLog, toolCallsToLog string
 
 	if group.EffectiveConfig.EnableRequestBodyLogging {
 		requestBodyToLog = string(bodyBytes)
@@ -414,6 +426,9 @@ func (ps *ProxyServer) logRequest(
 		// 提取agent上传的文件内容（如Cline插件上传的文件）
 		agentFiles := utils.ExtractAgentFiles(bodyBytes)
 		agentFilesToLog = utils.AgentFilesToJSON(agentFiles)
+		// 提取历史消息中的工具调用信息（如Cline的工具调用）
+		toolCalls := utils.ExtractAgentToolCalls(bodyBytes)
+		toolCallsToLog = utils.AgentToolCallsToJSON(toolCalls)
 	}
 
 	duration := time.Since(startTime).Milliseconds()
@@ -432,6 +447,8 @@ func (ps *ProxyServer) logRequest(
 		UpstreamAddr: utils.TruncateString(upstreamAddr, 500),
 		RequestBody:  requestBodyToLog,
 		AgentFiles:   agentFilesToLog,
+		ToolCalls:     toolCallsToLog,
+		ResponseBody:  responseBody,
 	}
 
 	// 设置父组

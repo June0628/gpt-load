@@ -8,6 +8,7 @@ import (
 	"gpt-load/internal/models"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/sirupsen/logrus"
 )
@@ -44,7 +45,7 @@ func logUpstreamError(context string, err error) {
 
 // handleGzipCompression 检查gzip编码并在必要时解压响应体
 func handleGzipCompression(resp *http.Response, bodyBytes []byte) []byte {
-	if resp.Header.Get("Content-Encoding") == "gzip" {
+	if strings.Contains(resp.Header.Get("Content-Encoding"), "gzip") {
 		reader, gzipErr := gzip.NewReader(bytes.NewReader(bodyBytes))
 		if gzipErr != nil {
 			logrus.Warnf("Failed to create gzip reader for error body: %v", gzipErr)

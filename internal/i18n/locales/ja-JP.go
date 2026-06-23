@@ -44,6 +44,15 @@ var MessagesJaJP = map[string]string{
 	"logs.cleared":  "ログがクリアされました",
 	"logs.exported": "ログがエクスポートされました",
 
+	// Handler related
+	"handler.invalid_group_id":                           "無効なグループ ID",
+	"handler.aggregate_no_balance":                       "集約グループは残高照会をサポートしていません",
+	"handler.balance_query_not_enabled":                  "このグループでは残高照会が有効になっていません",
+	"handler.balance_query_in_progress":                  "このグループの残高照会が実行中です。後でもう一度お試しください",
+	"handler.balance_query_started":                      "残高照会を開始しました",
+	"handler.clear_task_failed":                          "タスクのクリアに失敗しました",
+	"handler.task_cleared":                               "タスクをクリアしました",
+
 	// Validation related
 	"validation.invalid_group_name":                          "無効なグループ名。小文字、数字、ハイフン、アンダースコアのみ使用可能、1-100文字",
 	"validation.invalid_test_path":                           "無効なテストパス。指定する場合は / で始まる有効なパスであり、完全なURLではない必要があります。",
@@ -74,6 +83,9 @@ var MessagesJaJP = map[string]string{
 	"validation.sub_group_weight_negative":                   "サブグループの重みは負の値にできません",
 	"validation.sub_group_weight_max_exceeded":               "サブグループの重みは1000を超えることはできません",
 	"validation.sub_group_referenced_cannot_modify":          "このグループは {{.count}} 個の集約グループでサブグループとして参照されています。チャンネルタイプまたは検証エンドポイントは変更できません。変更前に関連する集約グループからこのグループを削除してください",
+	"validation.sub_group_referenced_cannot_delete":          "このグループは {{.count}} 個の集約グループでサブグループとして参照されています。削除できません。削除前に関連集約グループからこのグループを削除してください",
+	"validation.aggregate_cannot_copy":                       "集約グループはコピーできません。代わりにサブグループを個別にコピーしてください",
+	"validation.group_copy_name_exhausted":                   "コピー用の固有グループ名を生成できません。コピーが多すぎます。一部のコピーを削除するか、ソースグループ名を変更してください",
 	"validation.standard_group_requires_upstreams_testmodel": "標準グループへの変換にはアップストリームサーバーとテストモデルの提供が必要です",
 	"validation.aggregate_no_model_redirect":                 "集約グループはモデルリダイレクトルールをサポートしていません",
 	"validation.reorder_items_required":                      "並び替え項目は空にできません",

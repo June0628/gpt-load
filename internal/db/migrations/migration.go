@@ -41,7 +41,12 @@ func MigrateDatabase(db *gorm.DB) error {
 	}
 
 	// Run v1.7.0 migration
-	return V1_7_0_AddKeyExpirationConfig(db)
+	if err := V1_7_0_AddKeyExpirationConfig(db); err != nil {
+		return err
+	}
+
+	// Run v1.8.0 migration
+	return V1_8_0_AddToolCallsAndResponseBodyColumns(db)
 }
 
 // HandleLegacyIndexes removes old indexes from previous versions to prevent migration errors

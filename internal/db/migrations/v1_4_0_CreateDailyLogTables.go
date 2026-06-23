@@ -65,10 +65,12 @@ func createDailyLogTable(db *gorm.DB, dialect string, tableName string) error {
 				user_agent VARCHAR(512),
 				request_type VARCHAR(20) NOT NULL DEFAULT 'final',
 				upstream_addr VARCHAR(500),
-				is_stream TINYINT(1) NOT NULL DEFAULT 0,
-				request_body MEDIUMTEXT,
-				agent_files LONGTEXT,
-				INDEX idx_timestamp (timestamp),
+			is_stream TINYINT(1) NOT NULL DEFAULT 0,
+			request_body MEDIUMTEXT,
+			agent_files LONGTEXT,
+			tool_calls LONGTEXT,
+			response_body LONGTEXT,
+			INDEX idx_timestamp (timestamp),
 				INDEX idx_group_id (group_id),
 				INDEX idx_group_name (group_name),
 				INDEX idx_parent_group_id (parent_group_id),
@@ -83,7 +85,7 @@ func createDailyLogTable(db *gorm.DB, dialect string, tableName string) error {
 		createSQL = fmt.Sprintf(`
 			CREATE TABLE IF NOT EXISTS %s (
 				id TEXT PRIMARY KEY,
-				timestamp TEXT NOT NULL,
+				timestamp DATETIME NOT NULL,
 				group_id INTEGER NOT NULL,
 				group_name TEXT,
 				parent_group_id INTEGER,
@@ -100,10 +102,12 @@ func createDailyLogTable(db *gorm.DB, dialect string, tableName string) error {
 				user_agent TEXT,
 				request_type TEXT NOT NULL DEFAULT 'final',
 				upstream_addr TEXT,
-				is_stream INTEGER NOT NULL DEFAULT 0,
-				request_body TEXT,
-				agent_files TEXT
-			)
+			is_stream INTEGER NOT NULL DEFAULT 0,
+			request_body TEXT,
+			agent_files TEXT,
+			tool_calls TEXT,
+			response_body TEXT
+		)
 		`, tableName)
 	}
 

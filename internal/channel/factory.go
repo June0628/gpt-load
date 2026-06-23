@@ -58,17 +58,19 @@ func NewFactory(settingsManager *config.SystemSettingsManager, clientManager *ht
 
 // GetChannel 根据分组的通道类型返回通道代理
 func (f *Factory) GetChannel(group *models.Group) (ChannelProxy, error) {
+	// 第一次检查（读锁语义）：快速路径，命中且未过期直接返回
 	f.cacheLock.Lock()
-	defer f.cacheLock.Unlock()
-
 	if channel, ok := f.channelCache[group.ID]; ok {
 		if !channel.IsConfigStale(group) {
+			f.cacheLock.Unlock()
 			return channel, nil
 		}
 	}
+	f.cacheLock.Unlock()
 
 	logrus.Debugf("Creating new channel for group %d with type '%s'", group.ID, group.ChannelType)
 
+	// 构造过程在锁外执行，避免阻塞所有并发 proxy 请求
 	constructor, ok := channelRegistry[group.ChannelType]
 	if !ok {
 		return nil, fmt.Errorf("unsupported channel type: %s", group.ChannelType)
@@ -77,6 +79,17 @@ func (f *Factory) GetChannel(group *models.Group) (ChannelProxy, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// 第二次检查（写锁语义）：可能已有其他 goroutine 完成构造，优先使用已有的非过期实例
+	f.cacheLock.Lock()
+	defer f.cacheLock.Unlock()
+
+	if existing, ok := f.channelCache[group.ID]; ok {
+		if !existing.IsConfigStale(group) {
+			return existing, nil
+		}
+	}
+
 	f.channelCache[group.ID] = channel
 	return channel, nil
 }

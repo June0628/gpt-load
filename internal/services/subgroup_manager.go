@@ -169,7 +169,20 @@ func (s *selector) selectNext() string {
 		}
 
 		if attempted[item.subGroupID] {
-			continue
+			// 当 selectByWeight 返回已尝试过的 item（如全0权重时总是返回第一个），
+			// 不再 continue 空转，而是遍历 subGroups 找到第一个未尝试的子分组
+			found := false
+			for i := range s.subGroups {
+				if !attempted[s.subGroups[i].subGroupID] {
+					item = &s.subGroups[i]
+					found = true
+					break
+				}
+			}
+			if !found {
+				// 所有子分组都已尝试过，退出循环
+				break
+			}
 		}
 		attempted[item.subGroupID] = true
 

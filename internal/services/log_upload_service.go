@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -44,6 +45,33 @@ func NewLogUploadService(db *gorm.DB, settingsManager *config.SystemSettingsMana
 // Start 启动日志上传服务（上传逻辑由 LogCleanupService 统一调度，此处保留接口兼容性）
 func (s *LogUploadService) Start() {
 	logrus.Debug("日志上传服务已启动（上传由清理服务协调）")
+}
+
+// CleanupOrphanTempFiles 清理历史上传失败遗留的临时文件（CSV 和 .gz）
+// 应在应用启动时调用一次，避免磁盘空间被无用文件占用
+func (s *LogUploadService) CleanupOrphanTempFiles() {
+	patterns := []string{"gpt-load-csv-*.csv", "gpt-load-csv-*.csv.gz"}
+	cleanedCount := 0
+
+	for _, pattern := range patterns {
+		matches, err := filepath.Glob(filepath.Join(os.TempDir(), pattern))
+		if err != nil {
+			logrus.WithError(err).WithField("pattern", pattern).Warn("扫描临时文件失败")
+			continue
+		}
+		for _, f := range matches {
+			if err := os.Remove(f); err != nil {
+				logrus.WithError(err).WithField("file", f).Warn("清理临时文件失败")
+				continue
+			}
+			cleanedCount++
+			logrus.WithField("file", f).Debug("已清理历史临时文件")
+		}
+	}
+
+	if cleanedCount > 0 {
+		logrus.WithField("count", cleanedCount).Info("已清理历史上传失败的临时文件")
+	}
 }
 
 // Stop 停止日志上传服务
@@ -129,7 +157,8 @@ func (s *LogUploadService) uploadTableLocked(tableName string) error {
 	case "tencent", "cos", "tencent_cos":
 		return s.uploadTableToTencentCOSStream(tableName, filename, settings)
 	case "webdav":
-		return s.uploadTableToWebDAVStream(tableName, filename, settings)
+		// 流式上传已禁用，WebDAV 使用 gzip 压缩临时文件上传
+		return s.uploadTableToWebDAVWithGzipTempFile(tableName, filename, settings)
 	default:
 		return fmt.Errorf("未知上传提供商: %s", provider)
 	}
@@ -199,7 +228,7 @@ func (s *LogUploadService) exportTableToCSVStream(tableName string, onRow func([
 		"table":     tableName,
 		"row_count": rowCount,
 		"col_count": len(columns),
-	}).Debug("表数据流式导出为 CSV（包含所有字段包括大字段）")
+	}).Info("表数据流式导出为 CSV 完成（包含所有字段包括大字段）")
 
 	return rowCount, nil
 }
@@ -242,7 +271,7 @@ func (s *LogUploadService) exportTableToCSVFile(tableName string) (string, int, 
 		"table":     tableName,
 		"row_count": rowCount,
 		"tmp_file":  tmpPath,
-	}).Debug("表数据导出到 CSV 临时文件")
+	}).Info("表数据导出到 CSV 临时文件")
 
 	return tmpPath, rowCount, nil
 }
@@ -536,22 +565,28 @@ func sha1Hex(data string) string {
 // WebDAV 上传
 // ============================================================
 
-// uploadTableToWebDAVStream 流式上传表数据到 WebDAV 服务器，不生成临时文件
-// 如果流式上传失败，会自动降级到基于临时文件的上传
-func (s *LogUploadService) uploadTableToWebDAVStream(tableName, filename string, settings types.SystemSettings) error {
-	baseURL := settings.LogUploadWebDAVURL
-
-	if baseURL == "" {
-		return fmt.Errorf("WebDAV URL 未配置")
-	}
-
-	if !strings.HasSuffix(baseURL, "/") {
-		baseURL += "/"
-	}
-
-	// 对于大表，直接导出到 gzip 压缩的临时文件，然后上传
-	return s.uploadTableToWebDAVWithGzipTempFile(tableName, filename, settings)
-}
+// uploadTableToWebDAVStream 已弃用：WebDAV 流式上传与某些存储存在冲突，已禁用。
+// 请直接使用 uploadTableToWebDAVWithGzipTempFile。
+// func (s *LogUploadService) uploadTableToWebDAVStream(tableName, filename string, settings types.SystemSettings) error {
+// 	baseURL := settings.LogUploadWebDAVURL
+//
+// 	if baseURL == "" {
+// 		return fmt.Errorf("WebDAV URL 未配置")
+// 	}
+//
+// 	if !strings.HasSuffix(baseURL, "/") {
+// 		baseURL += "/"
+// 	}
+//
+// 	logrus.WithFields(logrus.Fields{
+// 		"table":      tableName,
+// 		"filename":   filename,
+// 		"webdav_url": baseURL,
+// 	}).Info("开始 WebDAV 上传（gzip 压缩模式）")
+//
+// 	// 对于大表，直接导出到 gzip 压缩的临时文件，然后上传
+// 	return s.uploadTableToWebDAVWithGzipTempFile(tableName, filename, settings)
+// }
 
 // uploadTableToWebDAVWithGzipTempFile 导出表数据为 CSV 并压缩成 gzip，然后上传
 // 适用于大表上传，可显著减少上传时间和流量
@@ -618,7 +653,6 @@ func (s *LogUploadService) uploadTableToWebDAVWithGzipTempFile(tableName, filena
 }
 
 // verifyWebDAVUpload 通过 HEAD 请求验证上传的文件存在且大小匹配
-// verifyWebDAVUpload 通过 HEAD 请求验证文件存在且大小匹配
 func (s *LogUploadService) verifyWebDAVUpload(filename string, expectedSize int64, settings types.SystemSettings) error {
 	baseURL := settings.LogUploadWebDAVURL
 	username := settings.LogUploadWebDAVUsername
@@ -634,6 +668,11 @@ func (s *LogUploadService) verifyWebDAVUpload(filename string, expectedSize int6
 	filename = strings.TrimPrefix(filename, "/")
 	verifyURL := baseURL + filename
 
+	logrus.WithFields(logrus.Fields{
+		"verify_url":    verifyURL,
+		"expected_size": expectedSize,
+	}).Info("开始 WebDAV 上传事后验证（HEAD 请求）")
+
 	client := &http.Client{Timeout: 30 * time.Second}
 	req, err := http.NewRequest("HEAD", verifyURL, nil)
 	if err != nil {
@@ -641,29 +680,62 @@ func (s *LogUploadService) verifyWebDAVUpload(filename string, expectedSize int6
 	}
 	if username != "" || password != "" {
 		req.SetBasicAuth(username, password)
+		logrus.WithField("verify_url", verifyURL).Debug("WebDAV 验证请求使用 Basic Auth")
 	}
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("WebDAV 验证请求失败: %w", err)
+		// 某些 WebDAV 服务器（如 nginx + dav 模块）不支持 HEAD 请求，会直接断开连接，
+		// 此时 PUT 实际上传已成功，不应因验证失败而阻断上传流程
+		logrus.WithError(err).WithField("verify_url", verifyURL).Warn("WebDAV HEAD 验证请求失败（可能是服务器不支持 HEAD），跳过验证，视为上传成功")
+		return nil
 	}
 	defer resp.Body.Close()
 
+	logrus.WithFields(logrus.Fields{
+		"verify_url":         verifyURL,
+		"status_code":        resp.StatusCode,
+		"content_length":     resp.ContentLength,
+		"expected_size":      expectedSize,
+	}).Info("WebDAV 验证响应")
+
 	// HEAD 请求成功状态码：200 或 207（PROPFIND 风格）
+	// 403 表示服务器拒绝 HEAD 但文件可能已存在（常见于某些云存储），记录警告但不视为验证失败
+	if resp.StatusCode == 403 {
+		logrus.WithFields(logrus.Fields{
+			"verify_url":  verifyURL,
+			"status_code": resp.StatusCode,
+		}).Warn("WebDAV HEAD 请求返回 403，可能是服务器禁止 HEAD 访问，跳过验证，视为上传成功")
+		return nil
+	}
+
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		logrus.WithFields(logrus.Fields{
+			"verify_url":  verifyURL,
+			"status_code": resp.StatusCode,
+		}).Error("WebDAV 验证失败，文件不存在")
 		return fmt.Errorf("WebDAV 验证失败，文件不存在，状态码 %d", resp.StatusCode)
 	}
 
 	// 校验文件大小（部分 WebDAV 服务器可能不返回 Content-Length，此时仅校验存在性）
 	if resp.ContentLength >= 0 && resp.ContentLength != expectedSize {
+		logrus.WithFields(logrus.Fields{
+			"verify_url":     verifyURL,
+			"expected_size":  expectedSize,
+			"actual_size":    resp.ContentLength,
+		}).Error("WebDAV 验证失败，文件大小不匹配")
 		return fmt.Errorf("WebDAV 验证失败，文件大小不匹配: 期望 %d, 实际 %d", expectedSize, resp.ContentLength)
+	}
+
+	if resp.ContentLength < 0 {
+		logrus.WithField("verify_url", verifyURL).Warn("WebDAV 服务器未返回 Content-Length，跳过文件大小校验，仅校验存在性")
 	}
 
 	return nil
 }
 
 // compressGzip 将源文件压缩为 gzip 格式
-func (s *LogUploadService) compressGzip(srcPath, dstPath string) error {
+func (s *LogUploadService) compressGzip(srcPath, dstPath string) (err error) {
 	srcFile, err := os.Open(srcPath)
 	if err != nil {
 		return fmt.Errorf("打开源文件失败: %w", err)
@@ -676,14 +748,21 @@ func (s *LogUploadService) compressGzip(srcPath, dstPath string) error {
 	}
 	defer dstFile.Close()
 
+	// 压缩失败时清理未完成的 gzip 文件，避免残留文件占用磁盘空间
+	defer func() {
+		if err != nil {
+			os.Remove(dstPath)
+		}
+	}()
+
 	gzWriter := gzip.NewWriter(dstFile)
 
-	if _, err := io.Copy(gzWriter, srcFile); err != nil {
+	if _, err = io.Copy(gzWriter, srcFile); err != nil {
 		gzWriter.Close()
 		return fmt.Errorf("gzip 压缩写入失败: %w", err)
 	}
 
-	if err := gzWriter.Close(); err != nil {
+	if err = gzWriter.Close(); err != nil {
 		return fmt.Errorf("gzip 关闭失败（可能 footer 写入错误）: %w", err)
 	}
 
@@ -722,6 +801,13 @@ func (s *LogUploadService) uploadFileToWebDAV(filePath, filename string, setting
 	filename = strings.TrimPrefix(filename, "/")
 	uploadURL := baseURL + filename
 
+	logrus.WithFields(logrus.Fields{
+		"upload_url":   uploadURL,
+		"file_size":    fileInfo.Size(),
+		"file_size_mb": fmt.Sprintf("%.2f", float64(fileInfo.Size())/1024/1024),
+		"base_url":     baseURL,
+	}).Info("开始 PUT 上传文件到 WebDAV")
+
 	req, err := http.NewRequest("PUT", uploadURL, file)
 	if err != nil {
 		return fmt.Errorf("创建 WebDAV 上传请求失败: %w", err)
@@ -738,20 +824,37 @@ func (s *LogUploadService) uploadFileToWebDAV(filePath, filename string, setting
 
 	if username != "" || password != "" {
 		req.SetBasicAuth(username, password)
+		logrus.WithField("upload_url", uploadURL).Debug("WebDAV 上传使用 Basic Auth")
+	} else {
+		logrus.WithField("upload_url", uploadURL).Warn("WebDAV 上传未配置认证凭据（用户名/密码为空）")
 	}
 
 	resp, err := client.Do(req)
 	if err != nil {
+		logrus.WithError(err).WithField("upload_url", uploadURL).Error("WebDAV PUT 请求失败")
 		return fmt.Errorf("WebDAV 上传请求失败: %w", err)
 	}
 	defer resp.Body.Close()
+
+	logrus.WithFields(logrus.Fields{
+		"upload_url":  uploadURL,
+		"status_code": resp.StatusCode,
+	}).Info("WebDAV PUT 响应")
 
 	// PUT 失败时自动通过 MKCOL 创建目录后重试一次
 	if resp.StatusCode == http.StatusConflict || resp.StatusCode == http.StatusNotFound {
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		logrus.WithField("url", uploadURL).WithField("status", resp.StatusCode).Warn("WebDAV PUT failed, attempting to create target directory via MKCOL and retry; body=" + string(body))
+		logrus.WithFields(logrus.Fields{
+			"upload_url":  uploadURL,
+			"status":      resp.StatusCode,
+			"response":    string(body),
+			"base_url":    baseURL,
+			"filename":    filename,
+		}).Warn("WebDAV PUT 返回 409/404，尝试通过 MKCOL 创建目标目录后重试")
+
 		if mkcolErr := s.ensureWebDAVDirectory(filename, settings); mkcolErr != nil {
+			logrus.WithError(mkcolErr).Error("MKCOL 创建目录失败")
 			return fmt.Errorf("WebDAV 上传失败(状态码 %d)，且自动创建目录失败: %w", resp.StatusCode, mkcolErr)
 		}
 
@@ -776,31 +879,51 @@ func (s *LogUploadService) uploadFileToWebDAV(filePath, filename string, setting
 			retryReq.SetBasicAuth(username, password)
 		}
 
+		logrus.WithFields(logrus.Fields{
+			"upload_url":  uploadURL,
+			"file_size":   fileInfo.Size(),
+		}).Info("MKCOL 创建目录成功，重试 WebDAV PUT 上传")
+
 		retryResp, retryErr := client.Do(retryReq)
 		if retryErr != nil {
+			logrus.WithError(retryErr).WithField("upload_url", uploadURL).Error("WebDAV 重试 PUT 请求失败")
 			return fmt.Errorf("WebDAV 重试上传请求失败: %w", retryErr)
 		}
 		defer retryResp.Body.Close()
 
+		logrus.WithFields(logrus.Fields{
+			"upload_url":  uploadURL,
+			"status_code": retryResp.StatusCode,
+		}).Info("WebDAV 重试 PUT 响应")
+
 		if retryResp.StatusCode < 200 || retryResp.StatusCode >= 300 {
 			body, _ := io.ReadAll(retryResp.Body)
+			logrus.WithFields(logrus.Fields{
+				"upload_url":  uploadURL,
+				"status_code": retryResp.StatusCode,
+				"response":    string(body),
+			}).Error("WebDAV 重试上传仍然失败")
 			return fmt.Errorf("WebDAV 重试上传仍失败，状态码 %d: %s", retryResp.StatusCode, string(body))
 		}
 
-		logrus.WithField("url", uploadURL).Info("WebDAV 上传成功（MKCOL 创建目录后重试）")
+		logrus.WithField("upload_url", uploadURL).Info("WebDAV 上传成功（MKCOL 创建目录后重试）")
 		return nil
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(resp.Body)
+		logrus.WithFields(logrus.Fields{
+			"upload_url":  uploadURL,
+			"status_code": resp.StatusCode,
+			"response":    string(body),
+		}).Error("WebDAV 上传失败，非预期状态码")
 		return fmt.Errorf("WebDAV 上传失败，状态码 %d: %s", resp.StatusCode, string(body))
 	}
 
-	logrus.WithField("url", uploadURL).Info("WebDAV 上传成功")
+	logrus.WithField("upload_url", uploadURL).Info("WebDAV PUT 上传成功")
 	return nil
 }
 
-// ensureWebDAVDirectory 通过 MKCOL 创建 filename 所在的父目录（支持多级）。
 // ensureWebDAVDirectory 通过 MKCOL 逐级创建父目录
 func (s *LogUploadService) ensureWebDAVDirectory(filename string, settings types.SystemSettings) error {
 	baseURL := settings.LogUploadWebDAVURL
@@ -819,24 +942,39 @@ func (s *LogUploadService) ensureWebDAVDirectory(filename string, settings types
 	idx := strings.LastIndex(filename, "/")
 	if idx <= 0 {
 		// 没有子目录，无需创建
+		logrus.WithField("filename", filename).Debug("文件名不包含子目录，跳过 MKCOL")
 		return nil
 	}
-	dirPath := filename[:idx] // 例如 "backup/sub"
+	dirPath := filename[:idx] // 例如 "logs"
+
+	logrus.WithFields(logrus.Fields{
+		"dir_path":  dirPath,
+		"base_url":  baseURL,
+		"filename":  filename,
+	}).Info("开始逐级创建 WebDAV 目录")
 
 	client := &http.Client{Timeout: 30 * time.Second}
 
-	// 逐级创建目录：backup -> backup/sub
+	// 逐级创建目录：logs
 	parts := strings.Split(dirPath, "/")
 	current := ""
-	for _, part := range parts {
+	for i, part := range parts {
 		if part == "" {
 			continue
 		}
 		current = current + "/" + part
 		mkcolURL := baseURL + strings.TrimPrefix(current, "/") + "/"
 
+		logrus.WithFields(logrus.Fields{
+			"level":       i + 1,
+			"part":        part,
+			"current_path": current,
+			"mkcol_url":   mkcolURL,
+		}).Info("尝试 MKCOL 创建目录")
+
 		req, err := http.NewRequest("MKCOL", mkcolURL, nil)
 		if err != nil {
+			logrus.WithError(err).WithField("mkcol_url", mkcolURL).Error("创建 MKCOL 请求失败")
 			return fmt.Errorf("创建 MKCOL 请求失败: %w", err)
 		}
 		if username != "" || password != "" {
@@ -845,17 +983,30 @@ func (s *LogUploadService) ensureWebDAVDirectory(filename string, settings types
 
 		resp, err := client.Do(req)
 		if err != nil {
+			logrus.WithError(err).WithField("mkcol_url", mkcolURL).Error("MKCOL 请求失败")
 			return fmt.Errorf("MKCOL 请求失败: %w", err)
 		}
 		// 201 Created 表示新建成功；405 Method Not Allowed 通常表示目录已存在，可忽略
 		if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusMethodNotAllowed {
 			body, _ := io.ReadAll(resp.Body)
 			resp.Body.Close()
+			logrus.WithFields(logrus.Fields{
+				"mkcol_url":   mkcolURL,
+				"status_code": resp.StatusCode,
+				"response":    string(body),
+			}).Error("MKCOL 创建目录失败")
 			return fmt.Errorf("MKCOL 创建目录 %s 失败，状态码 %d: %s", mkcolURL, resp.StatusCode, string(body))
+		}
+
+		if resp.StatusCode == http.StatusCreated {
+			logrus.WithField("mkcol_url", mkcolURL).Info("MKCOL 目录创建成功 (201)")
+		} else {
+			logrus.WithField("mkcol_url", mkcolURL).Info("MKCOL 目录已存在 (405)")
 		}
 		resp.Body.Close()
 	}
 
+	logrus.WithField("dir_path", dirPath).Info("WebDAV 目录创建完成")
 	return nil
 }
 

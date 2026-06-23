@@ -44,6 +44,15 @@ var MessagesZhCN = map[string]string{
 	"logs.cleared":  "日志已清除",
 	"logs.exported": "日志导出成功",
 
+	// Handler related
+	"handler.invalid_group_id":                           "无效的分组 ID",
+	"handler.aggregate_no_balance":                       "聚合分组不支持余额查询",
+	"handler.balance_query_not_enabled":                  "该分组未启用余额查询",
+	"handler.balance_query_in_progress":                  "该分组正在进行余额查询，请稍后再试",
+	"handler.balance_query_started":                      "余额查询已启动",
+	"handler.clear_task_failed":                          "清除任务失败",
+	"handler.task_cleared":                               "任务已清除",
+
 	// Validation related
 	"validation.invalid_group_name":                          "无效的分组名称。只能包含小写字母、数字、中划线或下划线，长度1-100位",
 	"validation.invalid_test_path":                           "无效的测试路径。如果提供，必须是以 / 开头的有效路径，且不能是完整的URL。",
@@ -75,6 +84,9 @@ var MessagesZhCN = map[string]string{
 	"validation.sub_group_weight_max_exceeded":               "子分组权重不能超过1000",
 	"validation.sub_group_referenced_cannot_modify":          "该分组正被 {{.count}} 个聚合分组引用为子分组，无法修改渠道类型或验证端点。请先从相关聚合分组中移除此分组后再进行修改",
 	"validation.standard_group_requires_upstreams_testmodel": "转换为标准分组需要提供上游服务器和测试模型",
+	"validation.sub_group_referenced_cannot_delete":          "该分组正被 {{.count}} 个聚合分组引用为子分组，无法删除。请先从相关聚合分组中移除此分组后再删除",
+	"validation.aggregate_cannot_copy":                       "无法复制聚合分组。请改为单独复制其子分组",
+	"validation.group_copy_name_exhausted":                   "无法为副本生成唯一的分组名称，存在的副本过多。请删除部分副本或先重命名源分组",
 	"validation.aggregate_no_model_redirect":                 "聚合分组不支持配置模型重定向规则",
 	"validation.reorder_items_required":                      "排序项不能为空",
 	"validation.reorder_group_id":                            "排序项包含无效分组ID",

@@ -112,6 +112,13 @@ func (s *RequestLogService) Record(log *models.RequestLog) error {
 	log.ID = uuid.NewString()
 	log.Timestamp = time.Now()
 
+	// 截断文本字段到 16MB，防止超过 MEDIUMTEXT 的限制导致写入失败
+	const maxFieldSize = 16 * 1024 * 1024 // 16MB
+	log.RequestBody = utils.TruncateString(log.RequestBody, maxFieldSize)
+	log.ResponseBody = utils.TruncateString(log.ResponseBody, maxFieldSize)
+	log.ToolCalls = utils.TruncateString(log.ToolCalls, maxFieldSize)
+	log.AgentFiles = utils.TruncateString(log.AgentFiles, maxFieldSize)
+
 	if s.settingsManager.GetSettings().RequestLogWriteIntervalMinutes == 0 {
 		return s.writeLogsToDB([]*models.RequestLog{log})
 	}
@@ -235,9 +242,11 @@ func (s *RequestLogService) ensureDailyLogTable(tx *gorm.DB, logDate time.Time) 
 				request_type VARCHAR(20) NOT NULL DEFAULT 'final',
 				upstream_addr VARCHAR(500),
 				is_stream TINYINT(1) NOT NULL DEFAULT 0,
-				request_body MEDIUMTEXT,
-				agent_files LONGTEXT,
-				INDEX idx_timestamp (timestamp),
+			request_body MEDIUMTEXT,
+			agent_files LONGTEXT,
+			tool_calls LONGTEXT,
+			response_body LONGTEXT,
+			INDEX idx_timestamp (timestamp),
 				INDEX idx_group_id (group_id),
 				INDEX idx_group_name (group_name),
 				INDEX idx_parent_group_id (parent_group_id),
@@ -251,7 +260,7 @@ func (s *RequestLogService) ensureDailyLogTable(tx *gorm.DB, logDate time.Time) 
 		createTableSQL = fmt.Sprintf(`
 			CREATE TABLE IF NOT EXISTS %s (
 				id TEXT PRIMARY KEY,
-				timestamp TEXT NOT NULL,
+				timestamp DATETIME NOT NULL,
 				group_id INTEGER NOT NULL,
 				group_name TEXT,
 				parent_group_id INTEGER,
@@ -268,10 +277,12 @@ func (s *RequestLogService) ensureDailyLogTable(tx *gorm.DB, logDate time.Time) 
 				user_agent TEXT,
 				request_type TEXT NOT NULL DEFAULT 'final',
 				upstream_addr TEXT,
-				is_stream INTEGER NOT NULL DEFAULT 0,
-				request_body TEXT,
-				agent_files TEXT
-			)
+			is_stream INTEGER NOT NULL DEFAULT 0,
+			request_body TEXT,
+			agent_files TEXT,
+			tool_calls TEXT,
+			response_body TEXT
+		)
 		`, tableName)
 	}
 

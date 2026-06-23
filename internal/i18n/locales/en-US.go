@@ -45,6 +45,13 @@ var MessagesEnUS = map[string]string{
 	"logs.exported": "Logs exported successfully",
 
 	// Validation related
+	"handler.invalid_group_id":                           "Invalid group ID",
+	"handler.aggregate_no_balance":                       "Aggregate groups do not support balance query",
+	"handler.balance_query_not_enabled":                  "Balance query is not enabled for this group",
+	"handler.balance_query_in_progress":                  "Balance query is in progress for this group, please try again later",
+	"handler.balance_query_started":                      "Balance query started",
+	"handler.clear_task_failed":                          "Failed to clear task",
+	"handler.task_cleared":                               "Task cleared",
 	"validation.invalid_group_name":                          "Invalid group name. Can only contain lowercase letters, numbers, hyphens or underscores, 1-100 characters",
 	"validation.invalid_test_path":                           "Invalid test path. If provided, must be a valid path starting with / and not a full URL.",
 	"validation.duplicate_header":                            "Duplicate header: {{.key}}",
@@ -74,6 +81,9 @@ var MessagesEnUS = map[string]string{
 	"validation.sub_group_weight_negative":                   "Sub-group weight cannot be negative",
 	"validation.sub_group_weight_max_exceeded":               "Sub-group weight cannot exceed 1000",
 	"validation.sub_group_referenced_cannot_modify":          "This group is referenced by {{.count}} aggregate group(s) as a sub-group. Cannot modify channel type or validation endpoint. Please remove this group from related aggregate groups before making changes",
+	"validation.sub_group_referenced_cannot_delete":          "This group is referenced by {{.count}} aggregate group(s) as a sub-group. Cannot delete it. Please remove this group from related aggregate groups before deleting",
+	"validation.aggregate_cannot_copy":                       "Cannot copy an aggregate group. Please copy its sub-groups individually instead",
+	"validation.group_copy_name_exhausted":                   "Cannot generate a unique group name for the copy. Too many copies exist. Please delete some copies or rename the source group first",
 	"validation.standard_group_requires_upstreams_testmodel": "Converting to standard group requires providing upstreams and test model",
 	"validation.aggregate_no_model_redirect":                 "Aggregate groups do not support model redirect rules",
 	"validation.reorder_items_required":                      "Reorder items cannot be empty",

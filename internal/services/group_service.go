@@ -560,6 +560,18 @@ func (s *GroupService) DeleteGroup(ctx context.Context, id uint) error {
 		return app_errors.ParseDBError(err)
 	}
 
+	// 标准分组若被聚合分组引用为子分组，删除会导致聚合分组引用悬空，应拒绝删除
+	if group.GroupType != "aggregate" {
+		refCount, err := s.aggregateGroupService.CountAggregateGroupsUsingSubGroup(ctx, id)
+		if err != nil {
+			return err
+		}
+		if refCount > 0 {
+			return NewI18nError(app_errors.ErrValidation, "validation.sub_group_referenced_cannot_delete",
+				map[string]any{"count": refCount})
+		}
+	}
+
 	if err := tx.Where("group_id = ? OR sub_group_id = ?", id, id).Delete(&models.GroupSubGroup{}).Error; err != nil {
 		return app_errors.ParseDBError(err)
 	}
@@ -619,9 +631,18 @@ func (s *GroupService) CopyGroup(ctx context.Context, sourceGroupID uint, copyKe
 		}
 	}()
 
+	// 聚合分组没有自己的密钥，且子分组关系不会随之复制，复制会产生无意义的空副本
+	if sourceGroup.GroupType == "aggregate" {
+		return nil, NewI18nError(app_errors.ErrValidation, "validation.aggregate_cannot_copy", nil)
+	}
+
 	newGroup := sourceGroup
 	newGroup.ID = 0
-	newGroup.Name = s.generateUniqueGroupName(ctx, sourceGroup.Name)
+	newGroupName, err := s.generateUniqueGroupName(ctx, sourceGroup.Name)
+	if err != nil {
+		return nil, err
+	}
+	newGroup.Name = newGroupName
 	if sourceGroup.DisplayName != "" {
 		newGroup.DisplayName = sourceGroup.DisplayName + " Copy"
 	}
@@ -1026,10 +1047,10 @@ func calculateRequestStats(total, failed int64) RequestStats {
 	return stats
 }
 
-func (s *GroupService) generateUniqueGroupName(ctx context.Context, baseName string) string {
+func (s *GroupService) generateUniqueGroupName(ctx context.Context, baseName string) (string, error) {
 	var groups []models.Group
 	if err := s.db.WithContext(ctx).Select("name").Find(&groups).Error; err != nil {
-		return baseName + "_copy"
+		return "", fmt.Errorf("failed to query existing group names: %w", err)
 	}
 
 	existingNames := make(map[string]bool, len(groups))
@@ -1039,17 +1060,18 @@ func (s *GroupService) generateUniqueGroupName(ctx context.Context, baseName str
 
 	copyName := baseName + "_copy"
 	if !existingNames[copyName] {
-		return copyName
+		return copyName, nil
 	}
 
 	for i := 2; i <= 1000; i++ {
 		candidate := fmt.Sprintf("%s_copy_%d", baseName, i)
 		if !existingNames[candidate] {
-			return candidate
+			return candidate, nil
 		}
 	}
 
-	return copyName
+	// 所有候选名均被占用，返回错误以避免触发 DB 唯一约束
+	return "", NewI18nError(app_errors.ErrValidation, "validation.group_copy_name_exhausted", nil)
 }
 
 // validGroupNameRegex 预编译，避免每次调用重新编译

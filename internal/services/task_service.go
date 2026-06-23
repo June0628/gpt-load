@@ -102,10 +102,14 @@ func (s *TaskService) GetTaskStatus() (*TaskStatus, error) {
 			status.DurationSeconds = now.Sub(status.StartedAt).Seconds()
 			status.Error = "task timed out after 30 minutes"
 			if resultBytes, mErr := json.Marshal(status); mErr == nil {
-				_ = s.store.Set(globalTaskResultKey, resultBytes, ResultTTL)
+				if sErr := s.store.Set(globalTaskResultKey, resultBytes, ResultTTL); sErr != nil {
+					logrus.WithError(sErr).Warn("Failed to write timed-out task result to store")
+				}
 			}
 			// 释放运行锁
-			_ = s.store.Delete(globalTaskKey)
+			if dErr := s.store.Delete(globalTaskKey); dErr != nil {
+				logrus.WithError(dErr).Warn("Failed to release running task lock after timeout")
+			}
 			return &TaskStatus{IsRunning: false}, nil
 		}
 

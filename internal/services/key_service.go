@@ -499,11 +499,12 @@ func (s *KeyService) QueryGroupBalances(group *models.Group) {
 		}()
 	}
 
+loop:
 	for i := range activeKeys {
 		select {
 		case jobs <- &activeKeys[i]:
 		case <-ctx.Done():
-			break
+			break loop
 		}
 	}
 	close(jobs)

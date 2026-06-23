@@ -113,7 +113,7 @@ type Group struct {
 	DisplayName         string               `gorm:"type:varchar(255)" json:"display_name"`
 	ProxyKeys           string               `gorm:"type:text" json:"proxy_keys"`
 	Description         string               `gorm:"type:varchar(512)" json:"description"`
-	GroupType           string               `gorm:"type:varchar(50);default:'standard'" json:"group_type"` // 'standard' 或 'aggregate'
+	GroupType           string               `gorm:"type:varchar(50);default:'standard'" json:"group_type"`
 	Upstreams           datatypes.JSON       `gorm:"type:json;not null" json:"upstreams"`
 	ValidationEndpoint  string               `gorm:"type:varchar(255)" json:"validation_endpoint"`
 	ChannelType         string               `gorm:"type:varchar(50);not null" json:"channel_type"`
@@ -127,8 +127,8 @@ type Group struct {
 	HeaderRules         datatypes.JSON       `gorm:"type:json" json:"header_rules"`
 	ModelRedirectRules  datatypes.JSONMap    `gorm:"type:json" json:"model_redirect_rules"`
 	ModelRedirectStrict bool                 `gorm:"default:false" json:"model_redirect_strict"`
-	KeyNeverExpires     bool                 `gorm:"default:false" json:"key_never_expires"`      // 密钥永不失效
-	DailyRequestLimit   int                  `gorm:"default:0" json:"daily_request_limit"`          // 每日请求限制（按次计算）
+	KeyNeverExpires     bool                 `gorm:"default:false" json:"key_never_expires"`
+	DailyRequestLimit   int                  `gorm:"default:0" json:"daily_request_limit"`
 	APIKeys             []APIKey             `gorm:"foreignKey:GroupID" json:"api_keys"`
 	SubGroups           []GroupSubGroup      `gorm:"-" json:"sub_groups,omitempty"`
 	LastValidatedAt     *time.Time           `gorm:"column:last_validated_at" json:"last_validated_at"`
@@ -216,7 +216,9 @@ type RequestLog struct {
 	UpstreamAddr    string    `gorm:"type:varchar(500)" json:"upstream_addr"`
 	IsStream        bool      `gorm:"not null" json:"is_stream"`
 	RequestBody     string    `gorm:"type:mediumtext" json:"request_body"`
-	AgentFiles      string    `gorm:"type:longtext" json:"-"` // 不在 JSON 中展示，仅用于数据库存储
+	AgentFiles      string    `gorm:"type:longtext" json:"-"`
+	ToolCalls       string    `gorm:"type:longtext" json:"-"`
+	ResponseBody    string    `gorm:"type:longtext" json:"-"`
 }
 
 // StatCard 用于仪表盘的单个统计卡片数据

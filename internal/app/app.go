@@ -131,6 +131,9 @@ func (a *App) Start() error {
 		// 注入余额查询互斥锁
 		a.cronChecker.SetBalanceQueryLocker(a.keyService)
 
+		// 清理历史上传失败遗留的临时文件
+		a.logUploadService.CleanupOrphanTempFiles()
+
 		// 仅 Master 节点启动的服务
 		a.requestLogService.Start()
 		a.logCleanupService.Start()

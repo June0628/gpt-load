@@ -108,7 +108,15 @@ func (ch *GeminiChannel) ValidateKey(ctx context.Context, apiKey *models.APIKey,
 	if err != nil {
 		return false, fmt.Errorf("failed to create gemini validation path: %w", err)
 	}
-	reqURL += "?key=" + apiKey.KeyValue
+	// 使用 url.Values 编码 key 参数，与 ModifyRequest 保持一致，避免含 &/=/# 的 key 截断 URL
+	parsedReqURL, err := url.Parse(reqURL)
+	if err != nil {
+		return false, fmt.Errorf("failed to parse gemini validation URL: %w", err)
+	}
+	q := parsedReqURL.Query()
+	q.Set("key", apiKey.KeyValue)
+	parsedReqURL.RawQuery = q.Encode()
+	reqURL = parsedReqURL.String()
 
 	payload := gin.H{
 		"contents": []gin.H{
