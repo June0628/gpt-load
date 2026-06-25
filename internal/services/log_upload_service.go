@@ -770,6 +770,7 @@ func (s *LogUploadService) compressGzip(srcPath, dstPath string) (err error) {
 }
 
 // uploadFileToWebDAV 从文件流式上传到 WebDAV 服务器
+// 支持 5xx 服务端错误自动重试（最多 3 次，指数退避）
 func (s *LogUploadService) uploadFileToWebDAV(filePath, filename string, settings types.SystemSettings) error {
 	baseURL := settings.LogUploadWebDAVURL
 	username := settings.LogUploadWebDAVUsername
@@ -783,144 +784,192 @@ func (s *LogUploadService) uploadFileToWebDAV(filePath, filename string, setting
 		baseURL += "/"
 	}
 
-	client := &http.Client{Timeout: 30 * time.Minute}
-
-	// 打开文件
-	file, err := os.Open(filePath)
-	if err != nil {
-		return fmt.Errorf("打开 WebDAV 上传文件失败: %w", err)
-	}
-	defer file.Close()
-
-	fileInfo, err := file.Stat()
-	if err != nil {
-		return fmt.Errorf("获取 WebDAV 上传文件信息失败: %w", err)
-	}
-
 	// 避免双斜杠
 	filename = strings.TrimPrefix(filename, "/")
 	uploadURL := baseURL + filename
 
-	logrus.WithFields(logrus.Fields{
-		"upload_url":   uploadURL,
-		"file_size":    fileInfo.Size(),
-		"file_size_mb": fmt.Sprintf("%.2f", float64(fileInfo.Size())/1024/1024),
-		"base_url":     baseURL,
-	}).Info("开始 PUT 上传文件到 WebDAV")
-
-	req, err := http.NewRequest("PUT", uploadURL, file)
+	// 获取文件大小（只需一次，不会随重试变化）
+	fileInfo, err := os.Stat(filePath)
 	if err != nil {
-		return fmt.Errorf("创建 WebDAV 上传请求失败: %w", err)
+		return fmt.Errorf("获取 WebDAV 上传文件信息失败: %w", err)
 	}
 
-	req.ContentLength = fileInfo.Size()
+	client := &http.Client{Timeout: 30 * time.Minute}
 
-	// 根据文件扩展名设置正确的 Content-Type
-	if strings.HasSuffix(strings.ToLower(filename), ".gz") {
-		req.Header.Set("Content-Type", "application/gzip")
-	} else {
-		req.Header.Set("Content-Type", "text/csv")
-	}
+	const maxRetries = 3
+	var lastErr error
 
-	if username != "" || password != "" {
-		req.SetBasicAuth(username, password)
-		logrus.WithField("upload_url", uploadURL).Debug("WebDAV 上传使用 Basic Auth")
-	} else {
-		logrus.WithField("upload_url", uploadURL).Warn("WebDAV 上传未配置认证凭据（用户名/密码为空）")
-	}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		logrus.WithError(err).WithField("upload_url", uploadURL).Error("WebDAV PUT 请求失败")
-		return fmt.Errorf("WebDAV 上传请求失败: %w", err)
-	}
-	defer resp.Body.Close()
-
-	logrus.WithFields(logrus.Fields{
-		"upload_url":  uploadURL,
-		"status_code": resp.StatusCode,
-	}).Info("WebDAV PUT 响应")
-
-	// PUT 失败时自动通过 MKCOL 创建目录后重试一次
-	if resp.StatusCode == http.StatusConflict || resp.StatusCode == http.StatusNotFound {
-		body, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		logrus.WithFields(logrus.Fields{
-			"upload_url":  uploadURL,
-			"status":      resp.StatusCode,
-			"response":    string(body),
-			"base_url":    baseURL,
-			"filename":    filename,
-		}).Warn("WebDAV PUT 返回 409/404，尝试通过 MKCOL 创建目标目录后重试")
-
-		if mkcolErr := s.ensureWebDAVDirectory(filename, settings); mkcolErr != nil {
-			logrus.WithError(mkcolErr).Error("MKCOL 创建目录失败")
-			return fmt.Errorf("WebDAV 上传失败(状态码 %d)，且自动创建目录失败: %w", resp.StatusCode, mkcolErr)
-		}
-
-		// 重新打开文件用于重试
-		retryFile, retryErr := os.Open(filePath)
-		if retryErr != nil {
-			return fmt.Errorf("重新打开上传文件失败: %w", retryErr)
-		}
-		defer retryFile.Close()
-
-		retryReq, retryErr := http.NewRequest("PUT", uploadURL, retryFile)
-		if retryErr != nil {
-			return fmt.Errorf("创建 WebDAV 重试上传请求失败: %w", retryErr)
-		}
-		retryReq.ContentLength = fileInfo.Size()
-		if strings.HasSuffix(strings.ToLower(filename), ".gz") {
-			retryReq.Header.Set("Content-Type", "application/gzip")
-		} else {
-			retryReq.Header.Set("Content-Type", "text/csv")
-		}
-		if username != "" || password != "" {
-			retryReq.SetBasicAuth(username, password)
-		}
-
-		logrus.WithFields(logrus.Fields{
-			"upload_url":  uploadURL,
-			"file_size":   fileInfo.Size(),
-		}).Info("MKCOL 创建目录成功，重试 WebDAV PUT 上传")
-
-		retryResp, retryErr := client.Do(retryReq)
-		if retryErr != nil {
-			logrus.WithError(retryErr).WithField("upload_url", uploadURL).Error("WebDAV 重试 PUT 请求失败")
-			return fmt.Errorf("WebDAV 重试上传请求失败: %w", retryErr)
-		}
-		defer retryResp.Body.Close()
-
-		logrus.WithFields(logrus.Fields{
-			"upload_url":  uploadURL,
-			"status_code": retryResp.StatusCode,
-		}).Info("WebDAV 重试 PUT 响应")
-
-		if retryResp.StatusCode < 200 || retryResp.StatusCode >= 300 {
-			body, _ := io.ReadAll(retryResp.Body)
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if attempt > 0 {
+			backoff := time.Duration(1<<uint(attempt-1)) * time.Second // 1s, 2s, 4s
 			logrus.WithFields(logrus.Fields{
 				"upload_url":  uploadURL,
-				"status_code": retryResp.StatusCode,
-				"response":    string(body),
-			}).Error("WebDAV 重试上传仍然失败")
-			return fmt.Errorf("WebDAV 重试上传仍失败，状态码 %d: %s", retryResp.StatusCode, string(body))
+				"attempt":     attempt,
+				"max_retries": maxRetries,
+				"backoff":     backoff,
+			}).Warn("WebDAV 上传 5xx/网络错误，准备重试")
+			time.Sleep(backoff)
 		}
 
-		logrus.WithField("upload_url", uploadURL).Info("WebDAV 上传成功（MKCOL 创建目录后重试）")
-		return nil
-	}
+		// 打开文件（每次重试需重新打开，因为 reader 会被消费）
+		file, err := os.Open(filePath)
+		if err != nil {
+			return fmt.Errorf("打开 WebDAV 上传文件失败: %w", err)
+		}
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
+		req, err := http.NewRequest("PUT", uploadURL, file)
+		if err != nil {
+			file.Close()
+			return fmt.Errorf("创建 WebDAV 上传请求失败: %w", err)
+		}
+
+		req.ContentLength = fileInfo.Size()
+
+		// 根据文件扩展名设置正确的 Content-Type
+		if strings.HasSuffix(strings.ToLower(filename), ".gz") {
+			req.Header.Set("Content-Type", "application/gzip")
+		} else {
+			req.Header.Set("Content-Type", "text/csv")
+		}
+
+		if username != "" || password != "" {
+			req.SetBasicAuth(username, password)
+		} else {
+			logrus.WithField("upload_url", uploadURL).Warn("WebDAV 上传未配置认证凭据（用户名/密码为空）")
+		}
+
+		logrus.WithFields(logrus.Fields{
+			"upload_url":   uploadURL,
+			"file_size":    fileInfo.Size(),
+			"file_size_mb": fmt.Sprintf("%.2f", float64(fileInfo.Size())/1024/1024),
+			"attempt":      attempt,
+		}).Info("开始 PUT 上传文件到 WebDAV")
+
+		resp, err := client.Do(req)
+		file.Close() // 请求已发送，尽早关闭文件句柄
+		if err != nil {
+			lastErr = fmt.Errorf("WebDAV 上传请求失败: %w", err)
+			logrus.WithError(err).WithField("upload_url", uploadURL).Error("WebDAV PUT 请求失败")
+			continue // 网络错误也重试
+		}
+
 		logrus.WithFields(logrus.Fields{
 			"upload_url":  uploadURL,
 			"status_code": resp.StatusCode,
-			"response":    string(body),
-		}).Error("WebDAV 上传失败，非预期状态码")
-		return fmt.Errorf("WebDAV 上传失败，状态码 %d: %s", resp.StatusCode, string(body))
+			"attempt":     attempt,
+		}).Info("WebDAV PUT 响应")
+
+		// 409/404 处理：尝试 MKCOL 创建目录后重试
+		if resp.StatusCode == http.StatusConflict || resp.StatusCode == http.StatusNotFound {
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			logrus.WithFields(logrus.Fields{
+				"upload_url": uploadURL,
+				"status":     resp.StatusCode,
+				"response":   string(body),
+				"filename":   filename,
+			}).Warn("WebDAV PUT 返回 409/404，尝试通过 MKCOL 创建目标目录后重试")
+
+			if mkcolErr := s.ensureWebDAVDirectory(filename, settings); mkcolErr != nil {
+				logrus.WithError(mkcolErr).Error("MKCOL 创建目录失败")
+				// MKCOL 失败是客户端配置问题，不重试
+				return fmt.Errorf("WebDAV 上传失败(状态码 %d)，且自动创建目录失败: %w", resp.StatusCode, mkcolErr)
+			}
+
+			retryErr := s.doMKCOLRetry(uploadURL, filePath, fileInfo, client, username, password)
+			if retryErr != nil {
+				lastErr = retryErr
+				continue // 进入外层 5xx 重试
+			}
+			logrus.WithField("upload_url", uploadURL).Info("WebDAV 上传成功（MKCOL 创建目录后重试）")
+			return nil
+		}
+
+		// 5xx 服务端错误：重试
+		if resp.StatusCode >= 500 && resp.StatusCode < 600 {
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			lastErr = fmt.Errorf("WebDAV 上传失败，状态码 %d: %s", resp.StatusCode, string(body))
+			logrus.WithFields(logrus.Fields{
+				"upload_url":  uploadURL,
+				"status_code": resp.StatusCode,
+				"response":    string(body),
+				"attempt":     attempt,
+			}).Warn("WebDAV 返回 5xx，将重试")
+			continue
+		}
+
+		// 4xx 客户端错误：不重试，直接返回
+		if resp.StatusCode >= 400 && resp.StatusCode < 500 {
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			return fmt.Errorf("WebDAV 上传失败，状态码 %d: %s", resp.StatusCode, string(body))
+		}
+
+		// 2xx 成功
+		resp.Body.Close()
+		logrus.WithField("upload_url", uploadURL).Info("WebDAV PUT 上传成功")
+		return nil
 	}
 
-	logrus.WithField("upload_url", uploadURL).Info("WebDAV PUT 上传成功")
+	// 所有重试用尽
+	return fmt.Errorf("WebDAV 上传失败（已重试 %d 次）: %w", maxRetries, lastErr)
+}
+
+// doMKCOLRetry 在 MKCOL 创建目录后执行一次 PUT 重试，返回 error 表示失败（调用方决定是否继续重试）
+func (s *LogUploadService) doMKCOLRetry(uploadURL, filePath string, fileInfo os.FileInfo, client *http.Client, username, password string) error {
+	retryFile, err := os.Open(filePath)
+	if err != nil {
+		return fmt.Errorf("重新打开上传文件失败: %w", err)
+	}
+	defer retryFile.Close()
+
+	retryReq, err := http.NewRequest("PUT", uploadURL, retryFile)
+	if err != nil {
+		return fmt.Errorf("创建 WebDAV 重试上传请求失败: %w", err)
+	}
+	retryReq.ContentLength = fileInfo.Size()
+
+	if strings.HasSuffix(strings.ToLower(uploadURL), ".gz") {
+		retryReq.Header.Set("Content-Type", "application/gzip")
+	} else {
+		retryReq.Header.Set("Content-Type", "text/csv")
+	}
+	if username != "" || password != "" {
+		retryReq.SetBasicAuth(username, password)
+	}
+
+	logrus.WithFields(logrus.Fields{
+		"upload_url": uploadURL,
+		"file_size":  fileInfo.Size(),
+	}).Info("MKCOL 创建目录成功，重试 WebDAV PUT 上传")
+
+	retryResp, err := client.Do(retryReq)
+	if err != nil {
+		return fmt.Errorf("WebDAV 重试上传请求失败: %w", err)
+	}
+	defer retryResp.Body.Close()
+
+	logrus.WithFields(logrus.Fields{
+		"upload_url":  uploadURL,
+		"status_code": retryResp.StatusCode,
+	}).Info("WebDAV MKCOL 后重试 PUT 响应")
+
+	if retryResp.StatusCode >= 500 && retryResp.StatusCode < 600 {
+		body, _ := io.ReadAll(retryResp.Body)
+		logrus.WithFields(logrus.Fields{
+			"upload_url":  uploadURL,
+			"status_code": retryResp.StatusCode,
+			"response":    string(body),
+		}).Warn("WebDAV MKCOL 后重试返回 5xx")
+		return fmt.Errorf("WebDAV MKCOL 后重试仍失败，状态码 %d: %s", retryResp.StatusCode, string(body))
+	}
+
+	if retryResp.StatusCode < 200 || retryResp.StatusCode >= 300 {
+		body, _ := io.ReadAll(retryResp.Body)
+		return fmt.Errorf("WebDAV MKCOL 后重试失败，状态码 %d: %s", retryResp.StatusCode, string(body))
+	}
+
 	return nil
 }
 

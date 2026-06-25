@@ -66,6 +66,13 @@ const configOptions = ref<GroupConfigOption[]>([]);
 const showProxyKeys = ref(false);
 const parentAggregateGroups = ref<ParentAggregateGroup[]>([]);
 
+// 基于当前域名拼接分组端点 URL
+const groupEndpoint = computed(() => {
+  if (!props.group?.name) {
+    return "";
+  }
+  return `${window.location.origin}/proxy/${props.group.name}`;
+});
 
 const proxyKeysDisplay = computed(() => {
   if (!props.group?.proxy_keys) {
@@ -343,10 +350,10 @@ function resetPage() {
           <div class="header-left">
             <h3 class="group-title">
               {{ group ? getGroupDisplayName(group) : t("keys.selectGroup") }}
-              <n-tooltip trigger="hover" v-if="group && group.endpoint">
+              <n-tooltip trigger="hover" v-if="group && groupEndpoint">
                 <template #trigger>
-                  <code class="group-url" @click="copyUrl(group.endpoint)">
-                    {{ group.endpoint }}
+                  <code class="group-url" @click="copyUrl(groupEndpoint)">
+                    {{ groupEndpoint }}
                   </code>
                 </template>
                 {{ t("keys.clickToCopy") }}
@@ -458,7 +465,7 @@ function resetPage() {
                 </n-tooltip>
               </n-statistic>
             </n-grid-item>
-            <n-grid-item span="1">
+            <n-grid-item span="1" v-if="group?.balance_query_config?.enabled">
               <!-- 余额汇总信息 -->
               <n-statistic :label="`${t('keys.balanceInfo')}`">
                 <template #default>
@@ -496,7 +503,6 @@ function resetPage() {
                       </n-tooltip>
                     </div>
                     <span v-else class="no-balance">{{ t("keys.noBalanceInfo") }}</span>
-
                   </div>
                 </template>
               </n-statistic>

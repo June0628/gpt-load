@@ -81,6 +81,7 @@ func (s *CronChecker) runLoop() {
 	defer s.wg.Done()
 
 	s.submitValidationJobs()
+	s.submitBalanceQueryJobs()
 
 	validationTicker := time.NewTicker(5 * time.Minute)
 	defer validationTicker.Stop()

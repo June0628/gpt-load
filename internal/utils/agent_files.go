@@ -121,7 +121,12 @@ func extractFileFromContentItem(item map[string]any, files *[]AgentFileContent) 
 
 	case "text":
 		// 文本类型（如Cline插件发送的代码文件内容）
+		// Cline 发送的 content item 格式为 {"type":"text","data":"..."}，内容在 data 字段
+		// 兼容同时检查 text 和 data 字段
 		text, _ := item["text"].(string)
+		if text == "" {
+			text, _ = item["data"].(string)
+		}
 		if text != "" {
 			*files = append(*files, AgentFileContent{
 				Type: "text",
@@ -271,56 +276,26 @@ func ExtractAgentToolCalls(requestBody []byte) []AgentToolCall {
 	return calls
 }
 
-// AgentToolCallsToJSON 将工具调用转为 JSON 字符串，超出 16MB 时使用二分查找截断
+// AgentToolCallsToJSON 将工具调用转为 JSON 字符串
 func AgentToolCallsToJSON(calls []AgentToolCall) string {
 	if len(calls) == 0 {
 		return ""
 	}
-	return truncateJSONSlice(calls, len(calls), func(n int) ([]byte, error) {
-		return json.Marshal(calls[:n])
-	})
+	data, err := json.Marshal(calls)
+	if err != nil {
+		return ""
+	}
+	return string(data)
 }
 
-// AgentFilesToJSON 将文件内容转为 JSON 字符串，超出 16MB 时使用二分查找截断
+// AgentFilesToJSON 将文件内容转为 JSON 字符串
 func AgentFilesToJSON(files []AgentFileContent) string {
 	if len(files) == 0 {
 		return ""
 	}
-	return truncateJSONSlice(files, len(files), func(n int) ([]byte, error) {
-		return json.Marshal(files[:n])
-	})
-}
-
-const maxAgentJSONSize = 16 * 1024 * 1024 // 16MB
-
-// truncateJSONSlice 使用二分查找找到不超过 maxAgentJSONSize 的最大元素数
-func truncateJSONSlice[T any](_ []T, total int, marshal func(n int) ([]byte, error)) string {
-	data, err := marshal(total)
+	data, err := json.Marshal(files)
 	if err != nil {
 		return ""
 	}
-	if len(data) <= maxAgentJSONSize {
-		return string(data)
-	}
-
-	// 二分查找：在 [1, total) 中找最大的 n 使得序列化后 ≤ maxAgentJSONSize
-	lo, hi := 1, total
-	var best []byte
-	for lo < hi {
-		mid := (lo + hi) / 2
-		data, err := marshal(mid)
-		if err != nil {
-			return ""
-		}
-		if len(data) <= maxAgentJSONSize {
-			best = data
-			lo = mid + 1
-		} else {
-			hi = mid
-		}
-	}
-	if len(best) == 0 {
-		return ""
-	}
-	return string(best)
+	return string(data)
 }

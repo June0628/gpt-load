@@ -101,8 +101,21 @@ func CORS(config types.CORSConfig) gin.HandlerFunc {
 		c.Header("Access-Control-Allow-Methods", strings.Join(config.AllowedMethods, ", "))
 		c.Header("Access-Control-Allow-Headers", strings.Join(config.AllowedHeaders, ", "))
 
-		if config.AllowCredentials {
-			c.Header("Access-Control-Allow-Credentials", "true")
+		// 当 AllowCredentials 启用时，不允许通配符 Origin，防止安全风险
+		if config.AllowCredentials && allowed {
+			isWildcard := false
+			for _, allowedOrigin := range config.AllowedOrigins {
+				if allowedOrigin == "*" {
+					isWildcard = true
+					break
+				}
+			}
+			if isWildcard {
+				// 通配符 + AllowCredentials 不安全，回退为不发送凭证头
+				logrus.Warn("CORS: AllowCredentials is enabled with wildcard origin '*', ignoring AllowCredentials for security")
+			} else {
+				c.Header("Access-Control-Allow-Credentials", "true")
+			}
 		}
 
 		// 处理预检请求
@@ -161,7 +174,8 @@ func ProxyAuth(gm *services.GroupManager) gin.HandlerFunc {
 		// 注意：必须同时执行两个查找，避免短路求值导致的时序差异
 		_, existsInEffective := group.EffectiveConfig.ProxyKeysMap[key]
 		_, existsInGroup := group.ProxyKeysMap[key]
-		authorized := existsInEffective || existsInGroup
+		authorized := existsInEffective
+		authorized = authorized || existsInGroup
 
 		if authorized {
 			c.Next()

@@ -6,7 +6,7 @@ import GroupList from "@/components/keys/GroupList.vue";
 import KeyTable from "@/components/keys/KeyTable.vue";
 import SubGroupTable from "@/components/keys/SubGroupTable.vue";
 import type { Group, SubGroupInfo } from "@/types/models";
-import { onMounted, ref, watch } from "vue";
+import { onMounted, onUnmounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 const groups = ref<Group[]>([]);
@@ -16,16 +16,51 @@ const subGroups = ref<SubGroupInfo[]>([]);
 const loadingSubGroups = ref(false);
 const router = useRouter();
 const route = useRoute();
+let balancePollTimer: number | null = null;
 
 onMounted(async () => {
   await loadGroups();
+  // startBalancePolling 由 watch(selectedGroup) 自动触发，无需在此重复调用
 });
 
-async function loadGroups() {
+// 余额查询轮询：当选中分组启用余额查询时，每 60 秒自动刷新数据
+function startBalancePolling() {
+  stopBalancePolling();
+  if (selectedGroup.value?.balance_query_config?.enabled) {
+    balancePollTimer = window.setInterval(async () => {
+      await loadGroups(true);
+    }, 60000);
+  }
+}
+
+function stopBalancePolling() {
+  if (balancePollTimer !== null) {
+    clearInterval(balancePollTimer);
+    balancePollTimer = null;
+  }
+}
+
+// 监听选中分组变化，管理余额轮询
+watch(selectedGroup, () => {
+  startBalancePolling();
+});
+
+async function loadGroups(silent = false) {
   try {
-    loading.value = true;
+    if (!silent) {
+      loading.value = true;
+    }
     groups.value = await keysApi.getGroups();
-    // 选择默认分组
+
+    // 同步更新当前选中分组的数据（轮询时确保 UI 数据最新）
+    if (selectedGroup.value) {
+      const fresh = groups.value.find(g => g.id === selectedGroup.value?.id);
+      if (fresh) {
+        selectedGroup.value = fresh;
+      }
+    }
+
+    // 选择默认分组（仅首次）
     if (groups.value.length > 0 && !selectedGroup.value) {
       const groupId = route.query.groupId;
       const found = groups.value.find(g => String(g.id) === String(groupId));
@@ -37,9 +72,13 @@ async function loadGroups() {
     }
   } catch (error) {
     console.error("Failed to load groups:", error);
-    window.$message?.error("加载分组列表失败");
+    if (!silent) {
+      window.$message?.error("加载分组列表失败");
+    }
   } finally {
-    loading.value = false;
+    if (!silent) {
+      loading.value = false;
+    }
   }
 }
 
@@ -119,6 +158,10 @@ function handleNavigateToGroup(groupId: number) {
     handleGroupSelect(targetGroup);
   }
 }
+
+onUnmounted(() => {
+  stopBalancePolling();
+});
 </script>
 
 <template>

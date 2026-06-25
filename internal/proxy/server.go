@@ -328,7 +328,7 @@ func (ps *ProxyServer) executeRequestWithRetry(
 				requestType = models.RequestTypeFinal
 			}
 
-			ps.logRequest(c, originalGroup, group, apiKey, startTime, statusCode, errors.New(parsedError), isStream, upstreamURL, channelHandler, bodyBytes, requestType, "")
+			ps.logRequest(c, originalGroup, group, apiKey, startTime, statusCode, errors.New(parsedError), isStream, upstreamURL, channelHandler, finalBodyBytes, requestType, "")
 
 			// 如果是最后一次尝试，直接返回错误
 			if isLastAttempt {
@@ -350,6 +350,38 @@ func (ps *ProxyServer) executeRequestWithRetry(
 		// 注意：resp.Body 由各 handler 自行关闭，避免双重关闭
 
 		logrus.Debugf("Request for group %s succeeded on attempt %d with key %s", group.Name, retryCount+1, utils.MaskAPIKey(apiKey.KeyValue))
+
+		// 检查 aihubmix 渠道的滥用响应（HTTP 200 但内容为免费资源滥用提示）
+		// 未充值账户超过免费试用限制时，会返回 200 但内容为提示文本，需屏蔽并当作错误处理
+		if isAihubmixAbuseResponse(upstreamURL, resp) {
+			resp.Body.Close()
+			abuseError := "aihubmix: free resource abuse detected, please recharge your account"
+
+			logrus.WithFields(logrus.Fields{
+				"group": group.Name,
+				"keyID": apiKey.ID,
+			}).Warn("Aihubmix abuse response detected, retrying without failure count")
+
+			// 更新密钥状态，让 keyProvider 后续轮换掉这个 key
+			ps.keyProvider.UpdateStatus(apiKey, group, false, abuseError)
+
+			isLastAttempt := retryCount >= maxRetries
+			requestType := models.RequestTypeRetry
+			if isLastAttempt {
+				requestType = models.RequestTypeFinal
+			}
+
+			ps.logRequest(c, originalGroup, group, apiKey, startTime, http.StatusForbidden, errors.New(abuseError), isStream, upstreamURL, channelHandler, bodyBytes, requestType, "")
+
+			if isLastAttempt {
+				cancel()
+				response.Error(c, app_errors.NewAPIErrorWithUpstream(http.StatusForbidden, "UPSTREAM_ERROR", abuseError))
+				return
+			}
+
+			cancel()
+			continue
+		}
 
 		// 增加每日请求计数
 		ps.keyProvider.IncrementDailyRequestCount(apiKey, group)
@@ -386,7 +418,7 @@ func (ps *ProxyServer) executeRequestWithRetry(
 			}
 		}
 
-		ps.logRequest(c, originalGroup, group, apiKey, startTime, resp.StatusCode, nil, isStream, upstreamURL, channelHandler, bodyBytes, models.RequestTypeFinal, responseBody)
+		ps.logRequest(c, originalGroup, group, apiKey, startTime, resp.StatusCode, nil, isStream, upstreamURL, channelHandler, finalBodyBytes, models.RequestTypeFinal, responseBody)
 		return
 	}
 }

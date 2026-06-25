@@ -95,7 +95,7 @@ const moreOptions = computed(() => {
     divider,
     { label: t("keys.validateAllKeys"), key: "validateAll" },
     { label: t("keys.validateValidKeys"), key: "validateActive" },
-    { label: t("keys.validateInvalidKeys"), key: "validateInvalid" },
+    { label: t("keys.validateInvalidKeys"), key: "validateInvalid" }
   );
 
   return options;

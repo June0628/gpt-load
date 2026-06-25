@@ -112,12 +112,9 @@ func (s *RequestLogService) Record(log *models.RequestLog) error {
 	log.ID = uuid.NewString()
 	log.Timestamp = time.Now()
 
-	// 截断文本字段到 16MB，防止超过 MEDIUMTEXT 的限制导致写入失败
-	const maxFieldSize = 16 * 1024 * 1024 // 16MB
-	log.RequestBody = utils.TruncateString(log.RequestBody, maxFieldSize)
-	log.ResponseBody = utils.TruncateString(log.ResponseBody, maxFieldSize)
-	log.ToolCalls = utils.TruncateString(log.ToolCalls, maxFieldSize)
-	log.AgentFiles = utils.TruncateString(log.AgentFiles, maxFieldSize)
+	// 截断 request_body 到 16MB（MEDIUMTEXT 限制），其余字段为 LONGTEXT 无需截断
+	const maxRequestSize = 16 * 1024 * 1024 // 16MB
+	log.RequestBody = utils.TruncateString(log.RequestBody, maxRequestSize)
 
 	if s.settingsManager.GetSettings().RequestLogWriteIntervalMinutes == 0 {
 		return s.writeLogsToDB([]*models.RequestLog{log})

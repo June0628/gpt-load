@@ -61,6 +61,8 @@ var platformHandlers = map[string]PlatformBalanceHandler{
 	"api.zhipuai.cn":        handleZhipuBalance,          // 智谱 AI
 	"dashscope.aliyuncs.com":handleDashScopeBalance,      // 通义千问
 	"api.volcengine.com":    handleVolcEngineBalance,     // 火山引擎
+	"aihubmix.com":          handleAihubmixBalance,       // AIHubMix
+	"api.aihubmix.com":      handleAihubmixBalance,       // AIHubMix（API 域名）
 }
 
 // QueryBalance 查询单个密钥的余额
@@ -894,6 +896,86 @@ func handleDashScopeBalance(ctx context.Context, baseURL string, apiKey string, 
 func handleVolcEngineBalance(ctx context.Context, baseURL string, apiKey string, customPath string) (*BalanceInfo, error) {
 	// 火山引擎使用复杂的签名认证，使用默认处理器
 	return handleDefaultBalance(ctx, baseURL, apiKey, customPath)
+}
+
+// handleAihubmixBalance AIHubMix 余额查询
+// 使用 /api/user/self 接口查询用户信息和余额
+// 文档参考：https://docs.aihubmix.com/llms.txt
+func handleAihubmixBalance(ctx context.Context, baseURL string, apiKey string, customPath string) (*BalanceInfo, error) {
+	balancePath := customPath
+	if balancePath == "" {
+		balancePath = "/api/user/self"
+	}
+
+	reqURL := strings.TrimRight(baseURL, "/") + balancePath
+
+	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
+	if err != nil {
+		return &BalanceInfo{
+			Success:      false,
+			ErrorMessage: fmt.Sprintf("failed to create request: %v", err),
+		}, nil
+	}
+
+	// AIHubMix 使用 Manage Key 进行认证
+	req.Header.Set("Authorization", apiKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := serviceHTTPClient.Do(req)
+	if err != nil {
+		return &BalanceInfo{
+			Success:      false,
+			ErrorMessage: fmt.Sprintf("request failed: %v", err),
+		}, nil
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return &BalanceInfo{
+			Success:      false,
+			ErrorMessage: fmt.Sprintf("HTTP %d", resp.StatusCode),
+		}, nil
+	}
+
+	var result struct {
+		Success bool `json:"success"`
+		Data    struct {
+			Quota      int64  `json:"quota"`
+			UsedQuota  int64  `json:"used_quota"`
+			Username   string `json:"username"`
+			DisplayName string `json:"display_name"`
+		} `json:"data"`
+		Message string `json:"message"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return &BalanceInfo{
+			Success:      false,
+			ErrorMessage: fmt.Sprintf("failed to parse response: %v", err),
+		}, nil
+	}
+
+	if !result.Success {
+		errMsg := result.Message
+		if errMsg == "" {
+			errMsg = "API returned success=false"
+		}
+		return &BalanceInfo{
+			Success:      false,
+			ErrorMessage: errMsg,
+		}, nil
+	}
+
+	// AIHubMix 余额公式：quota / 500000
+	balanceTotal := fmt.Sprintf("%.4f", float64(result.Data.Quota)/500000.0)
+	balanceUsed := fmt.Sprintf("%.4f", float64(result.Data.UsedQuota)/500000.0)
+
+	return &BalanceInfo{
+		Success:      true,
+		BalanceTotal: balanceTotal,
+		BalanceUsed:  balanceUsed,
+		Currency:     "USD",
+	}, nil
 }
 
 // FormatBalanceInfo 将余额信息格式化为单行字符串，便于写入文件和日志
