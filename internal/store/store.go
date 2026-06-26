@@ -40,6 +40,9 @@ type Store interface {
 	// SetNX 在键不存在时设置键值对
 	SetNX(key string, value []byte, ttl time.Duration) (bool, error)
 
+	// Expire 为已存在的键设置过期时间
+	Expire(key string, ttl time.Duration) error
+
 	// HASH 操作
 	HSet(key string, values map[string]any) error
 	HGetAll(key string) (map[string]string, error)

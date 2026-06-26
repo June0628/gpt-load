@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"io"
 	"net/http"
+	"os"
 
 	"gpt-load/internal/utils"
 
@@ -14,6 +15,7 @@ import (
 
 // handleStreamingResponse 转发流式响应，并返回捕获的完整响应体
 // 流式客户端禁用了自动解压，因此需要手动解压捕获的响应体后再存储
+// 使用磁盘临时文件缓冲流式数据，避免大响应体在高并发下导致 OOM
 func (ps *ProxyServer) handleStreamingResponse(c *gin.Context, resp *http.Response) string {
 	defer resp.Body.Close()
 
@@ -28,6 +30,45 @@ func (ps *ProxyServer) handleStreamingResponse(c *gin.Context, resp *http.Respon
 		return ps.handleNormalResponse(c, resp)
 	}
 
+	// 使用磁盘临时文件缓冲流式响应，避免大响应体占用内存
+	tmpFile, err := os.CreateTemp("", "gpt-load-stream-*.bin")
+	if err != nil {
+		logrus.WithError(err).Warn("Failed to create temp file for streaming capture, falling back to in-memory buffer")
+		return ps.handleStreamingResponseInMemory(c, resp, flusher)
+	}
+	defer os.Remove(tmpFile.Name())
+	defer tmpFile.Close()
+
+	buf := make([]byte, 4*1024)
+	for {
+		n, err := resp.Body.Read(buf)
+		if n > 0 {
+			if _, writeErr := c.Writer.Write(buf[:n]); writeErr != nil {
+				logUpstreamError("writing stream to client", writeErr)
+				// 客户端断开，仍需读取已捕获的内容用于日志
+				return ps.readAndProcessTempFile(tmpFile, resp.Header)
+			}
+			flusher.Flush()
+			// 写入临时文件用于后续日志记录
+			if _, fileErr := tmpFile.Write(buf[:n]); fileErr != nil {
+				logUpstreamError("writing stream to temp file", fileErr)
+			}
+		}
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			logUpstreamError("reading from upstream", err)
+			break
+		}
+	}
+
+	return ps.readAndProcessTempFile(tmpFile, resp.Header)
+}
+
+// handleStreamingResponseInMemory 是 handleStreamingResponse 的内存降级版本
+// 当无法创建临时文件时使用，保留原有行为
+func (ps *ProxyServer) handleStreamingResponseInMemory(c *gin.Context, resp *http.Response, flusher http.Flusher) string {
 	var captured bytes.Buffer
 	buf := make([]byte, 4*1024)
 	for {
@@ -48,8 +89,21 @@ func (ps *ProxyServer) handleStreamingResponse(c *gin.Context, resp *http.Respon
 			return ps.decompressAndEncode(captured.Bytes(), resp.Header)
 		}
 	}
-
 	return ps.decompressAndEncode(captured.Bytes(), resp.Header)
+}
+
+// readAndProcessTempFile 从临时文件读取已捕获的流式数据，解压并编码后返回
+func (ps *ProxyServer) readAndProcessTempFile(tmpFile *os.File, headers http.Header) string {
+	if _, err := tmpFile.Seek(0, 0); err != nil {
+		logrus.WithError(err).Error("Failed to seek temp file for reading")
+		return ""
+	}
+	data, err := io.ReadAll(tmpFile)
+	if err != nil {
+		logrus.WithError(err).Error("Failed to read temp file for log capture")
+		return ""
+	}
+	return ps.decompressAndEncode(data, headers)
 }
 
 // handleNormalResponse 转发普通响应，自行关闭 resp.Body

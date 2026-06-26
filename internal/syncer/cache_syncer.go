@@ -60,7 +60,9 @@ func (s *CacheSyncer[T]) Get() T {
 	return s.cache
 }
 
-// Invalidate publishes a notification to all instances to reload their cache.
+// Invalidate 同步重新加载本地缓存，并发布通知让其他实例也重新加载。
+// 本地缓存同步更新确保发起变更的实例立即生效；
+// 如果发布通知失败，仅影响其他实例的缓存同步，本地缓存已正确更新。
 func (s *CacheSyncer[T]) Invalidate() error {
 	s.logger.Debug("publishing invalidation notification")
 	return s.store.Publish(s.channelName, []byte("reload"))

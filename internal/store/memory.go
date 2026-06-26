@@ -17,6 +17,8 @@ type memoryStoreItem struct {
 type MemoryStore struct {
 	mu            sync.RWMutex
 	data          map[string]any
+	muExpiries    sync.RWMutex
+	expiries      map[string]int64 // key -> Unix 纳秒过期时间，用于非 memoryStoreItem 类型（hash/list/set）
 	muSubscribers sync.RWMutex
 	subscribers   map[string]map[chan *Message]struct{}
 	stopCleanup   chan struct{}
@@ -26,6 +28,7 @@ type MemoryStore struct {
 func NewMemoryStore() *MemoryStore {
 	s := &MemoryStore{
 		data:        make(map[string]any),
+		expiries:    make(map[string]int64),
 		subscribers: make(map[string]map[chan *Message]struct{}),
 		stopCleanup: make(chan struct{}),
 	}
@@ -47,17 +50,38 @@ func (s *MemoryStore) cleanupExpired() {
 	}
 }
 
-// deleteExpired 删除所有过期的 key
+// deleteExpired 删除所有过期的 key（包括 memoryStoreItem 和通过 Expire 设置了 TTL 的 hash/list/set）
 func (s *MemoryStore) deleteExpired() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	now := time.Now().UnixNano()
+
+	// 清理 memoryStoreItem 类型的过期 key
+	s.mu.Lock()
 	for key, rawItem := range s.data {
 		if item, ok := rawItem.(memoryStoreItem); ok {
 			if item.expiresAt > 0 && now > item.expiresAt {
 				delete(s.data, key)
 			}
 		}
+	}
+	s.mu.Unlock()
+
+	// 清理通过 Expire 设置了 TTL 的 hash/list/set 类型
+	s.muExpiries.Lock()
+	var expiredKeys []string
+	for key, expiresAt := range s.expiries {
+		if expiresAt > 0 && now > expiresAt {
+			expiredKeys = append(expiredKeys, key)
+			delete(s.expiries, key)
+		}
+	}
+	s.muExpiries.Unlock()
+
+	if len(expiredKeys) > 0 {
+		s.mu.Lock()
+		for _, key := range expiredKeys {
+			delete(s.data, key)
+		}
+		s.mu.Unlock()
 	}
 }
 
@@ -178,6 +202,28 @@ func (s *MemoryStore) SetNX(key string, value []byte, ttl time.Duration) (bool, 
 	return true, nil
 }
 
+// Expire 为已存在的键设置过期时间
+func (s *MemoryStore) Expire(key string, ttl time.Duration) error {
+	s.muExpiries.Lock()
+	defer s.muExpiries.Unlock()
+	s.expiries[key] = time.Now().UnixNano() + ttl.Nanoseconds()
+	return nil
+}
+
+// isExpiredByExpiry 检查通过 Expire 设置了 TTL 的 key 是否已过期（调用者需自行加锁检查）
+func (s *MemoryStore) isExpiredByExpiry(key string) bool {
+	s.muExpiries.RLock()
+	expiresAt, ok := s.expiries[key]
+	s.muExpiries.RUnlock()
+	if !ok {
+		return false
+	}
+	if expiresAt > 0 && time.Now().UnixNano() > expiresAt {
+		return true
+	}
+	return false
+}
+
 // --- HASH 操作 ---
 
 func (s *MemoryStore) HSet(key string, values map[string]any) error {
@@ -204,6 +250,16 @@ func (s *MemoryStore) HSet(key string, values map[string]any) error {
 }
 
 func (s *MemoryStore) HGetAll(key string) (map[string]string, error) {
+	if s.isExpiredByExpiry(key) {
+		s.mu.Lock()
+		delete(s.data, key)
+		s.mu.Unlock()
+		s.muExpiries.Lock()
+		delete(s.expiries, key)
+		s.muExpiries.Unlock()
+		return make(map[string]string), nil
+	}
+
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -226,6 +282,15 @@ func (s *MemoryStore) HGetAll(key string) (map[string]string, error) {
 }
 
 func (s *MemoryStore) HIncrBy(key, field string, incr int64) (int64, error) {
+	if s.isExpiredByExpiry(key) {
+		s.mu.Lock()
+		delete(s.data, key)
+		s.mu.Unlock()
+		s.muExpiries.Lock()
+		delete(s.expiries, key)
+		s.muExpiries.Unlock()
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -486,9 +551,12 @@ func (s *MemoryStore) Subscribe(channel string) (Subscription, error) {
 func (s *MemoryStore) Clear() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.muExpiries.Lock()
+	defer s.muExpiries.Unlock()
 
 	// 清除所有数据
 	s.data = make(map[string]any)
+	s.expiries = make(map[string]int64)
 
 	return nil
 }

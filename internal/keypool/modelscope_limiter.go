@@ -15,6 +15,7 @@ const ModelScopeHeaderRemaining = "modelscope-ratelimit-model-requests-remaining
 // ModelScopeLimiter 管理魔塔平台模型维度的请求限流
 // 仅针对上游地址包含 api-inference.modelscope.cn 的情况
 // 使用内存存储，按天自动过期
+// 使用北京时间（asia/shanghai）计算过期边界，与每日请求限制保持一致
 type ModelScopeLimiter struct {
 	mu     sync.RWMutex
 	data   map[string]int       // key 格式: "{keyID}:{model}"
@@ -76,9 +77,9 @@ func (l *ModelScopeLimiter) UpdateModelRemaining(keyID uint, model string, remai
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	// 设置过期时间为当天结束
-	now := time.Now()
-	endOfDay := time.Date(now.Year(), now.Month(), now.Day(), 23, 59, 59, 0, now.Location())
+	// 设置过期时间为北京时间当天结束
+	now := time.Now().In(beijingLocation)
+	endOfDay := time.Date(now.Year(), now.Month(), now.Day(), 23, 59, 59, 0, beijingLocation)
 	l.expiry[keyID] = endOfDay
 
 	key := l.buildKey(keyID, model)

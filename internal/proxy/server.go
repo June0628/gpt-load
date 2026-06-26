@@ -137,6 +137,9 @@ func (ps *ProxyServer) executeRequestWithRetry(
 		modelName = channelHandler.ExtractModel(c, bodyBytes)
 	}
 
+	// dailyLimitSkips 记录因每日限制跳过的次数，不消耗主重试次数
+	dailyLimitSkips := 0
+
 	for retryCount := 0; retryCount <= maxRetries; retryCount++ {
 		// 先构建上游 URL，用于判断是否魔塔平台
 		upstreamURL, err := channelHandler.BuildUpstreamURL(c.Request.URL, originalGroup.Name)
@@ -167,7 +170,9 @@ func (ps *ProxyServer) executeRequestWithRetry(
 				"group": group.Name,
 				"keyID": apiKey.ID,
 			}).Debug("Key reached daily request limit, trying next key")
-			if retryCount < maxRetries {
+			dailyLimitSkips++
+			if dailyLimitSkips <= maxRetries {
+				retryCount-- // 不消耗主重试次数
 				continue
 			}
 			logrus.Errorf("All keys in group %s have reached daily request limit", group.Name)

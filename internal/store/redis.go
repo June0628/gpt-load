@@ -86,6 +86,11 @@ func (s *RedisStore) Close() error {
 	return s.client.Close()
 }
 
+// Expire 为已存在的键设置过期时间
+func (s *RedisStore) Expire(key string, ttl time.Duration) error {
+	return s.client.Expire(context.Background(), s.prefixKey(key), ttl).Err()
+}
+
 // --- HASH 操作 ---
 
 func (s *RedisStore) HSet(key string, values map[string]any) error {

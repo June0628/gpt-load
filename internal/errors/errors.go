@@ -38,6 +38,7 @@ var (
 	ErrNoActiveKeys       = &APIError{HTTPStatus: http.StatusServiceUnavailable, Code: "NO_ACTIVE_KEYS", Message: "No active API keys available for this group"}
 	ErrMaxRetriesExceeded = &APIError{HTTPStatus: http.StatusBadGateway, Code: "MAX_RETRIES_EXCEEDED", Message: "Request failed after maximum retries"}
 	ErrNoKeysAvailable    = &APIError{HTTPStatus: http.StatusServiceUnavailable, Code: "NO_KEYS_AVAILABLE", Message: "No API keys available to process the request"}
+	ErrTooManyRequests    = &APIError{HTTPStatus: http.StatusTooManyRequests, Code: "TOO_MANY_REQUESTS", Message: "Too many concurrent requests"}
 )
 
 // NewAPIError 创建带有自定义消息的新APIError
