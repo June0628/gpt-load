@@ -31,9 +31,9 @@ func NewDB(configManager types.ConfigManager) (*gorm.DB, error) {
 			log.New(os.Stdout, "\r\n", log.LstdFlags), // io writer
 			logger.Config{
 				SlowThreshold:             200 * time.Millisecond, // Slow SQL threshold
-				LogLevel:                  logger.Info, // Log level
-				IgnoreRecordNotFoundError: true,        // Ignore ErrRecordNotFound error for logger
-				Colorful:                  true,        // Disable color
+				LogLevel:                  logger.Info,            // Log level
+				IgnoreRecordNotFoundError: true,                   // Ignore ErrRecordNotFound error for logger
+				Colorful:                  true,                   // Disable color
 			},
 		)
 	}
@@ -83,9 +83,11 @@ func NewDB(configManager types.ConfigManager) (*gorm.DB, error) {
 		sqlDB.SetMaxIdleConns(1)
 		sqlDB.SetConnMaxLifetime(0)
 	} else {
-		sqlDB.SetMaxIdleConns(50)
-		sqlDB.SetMaxOpenConns(500)
-		sqlDB.SetConnMaxLifetime(time.Hour)
+		// 限制数据库连接池，避免同时连接数过高或大量空闲连接长期占用资源
+		sqlDB.SetMaxOpenConns(100)
+		sqlDB.SetMaxIdleConns(30)
+		sqlDB.SetConnMaxLifetime(30 * time.Minute)
+		sqlDB.SetConnMaxIdleTime(5 * time.Minute)
 	}
 
 	return DB, nil

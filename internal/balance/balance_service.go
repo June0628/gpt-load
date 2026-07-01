@@ -31,7 +31,7 @@ var serviceHTTPClient *http.Client
 func NewBalanceService() *BalanceService {
 	transport := &http.Transport{
 		MaxIdleConns:        100,
-		MaxIdleConnsPerHost: 10,
+		MaxIdleConnsPerHost: 30,
 		IdleConnTimeout:     90 * time.Second,
 	}
 	serviceHTTPClient = &http.Client{
@@ -46,23 +46,23 @@ type PlatformBalanceHandler func(ctx context.Context, baseURL string, apiKey str
 
 // platformHandlers 注册各平台的余额查询处理器
 var platformHandlers = map[string]PlatformBalanceHandler{
-	"default":               handleDefaultBalance,        // 默认处理器（尝试标准 OpenAI 格式）
-	"api.openai.com":        handleOpenAIBalance,         // OpenAI（使用真实 host 匹配）
-	"api.siliconflow.cn":    handleSiliconFlowBalance,    // 硅基流动（国内站）
-	"api.siliconflow.com":   handleSiliconFlowBalance,    // 硅基流动（国际站）
-	"api.chatanywhere.org":   handleChatAnywhereBalance,   // ChatAnywhere（特殊处理）
-	"api.chatanywhere.tech":  handleChatAnywhereBalance,   // ChatAnywhere（tech 域名）
-	"api.chatanywhere.com.cn": handleChatAnywhereBalance,  // ChatAnywhere（国内站）
-	"api.deepseek.com":      handleDeepSeekBalance,       // DeepSeek
-	"api.moonshot.cn":       handleMoonshotBalance,       // 月之暗面
-	"api.baichuan-ai.com":   handleBaichuanBalance,       // 百川智能
-	"api.minimax.chat":      handleMiniMaxBalance,        // MiniMax
-	"api.sparkai.com":       handleSparkBalance,          // 讯飞星火
-	"api.zhipuai.cn":        handleZhipuBalance,          // 智谱 AI
-	"dashscope.aliyuncs.com":handleDashScopeBalance,      // 通义千问
-	"api.volcengine.com":    handleVolcEngineBalance,     // 火山引擎
-	"aihubmix.com":          handleAihubmixBalance,       // AIHubMix
-	"api.aihubmix.com":      handleAihubmixBalance,       // AIHubMix（API 域名）
+	"default":                 handleDefaultBalance,      // 默认处理器（尝试标准 OpenAI 格式）
+	"api.openai.com":          handleOpenAIBalance,       // OpenAI（使用真实 host 匹配）
+	"api.siliconflow.cn":      handleSiliconFlowBalance,  // 硅基流动（国内站）
+	"api.siliconflow.com":     handleSiliconFlowBalance,  // 硅基流动（国际站）
+	"api.chatanywhere.org":    handleChatAnywhereBalance, // ChatAnywhere（特殊处理）
+	"api.chatanywhere.tech":   handleChatAnywhereBalance, // ChatAnywhere（tech 域名）
+	"api.chatanywhere.com.cn": handleChatAnywhereBalance, // ChatAnywhere（国内站）
+	"api.deepseek.com":        handleDeepSeekBalance,     // DeepSeek
+	"api.moonshot.cn":         handleMoonshotBalance,     // 月之暗面
+	"api.baichuan-ai.com":     handleUnsupportedBalance,  // 百川智能（不支持余额查询）
+	"api.minimax.chat":        handleUnsupportedBalance,  // MiniMax（不支持余额查询）
+	"api.sparkai.com":         handleSparkBalance,        // 讯飞星火
+	"api.zhipuai.cn":          handleUnsupportedBalance,  // 智谱 AI（不支持余额查询）
+	"dashscope.aliyuncs.com":  handleDashScopeBalance,    // 通义千问
+	"api.volcengine.com":      handleVolcEngineBalance,   // 火山引擎
+	"aihubmix.com":            handleAihubmixBalance,     // AIHubMix
+	"api.aihubmix.com":        handleAihubmixBalance,     // AIHubMix（API 域名）
 }
 
 // QueryBalance 查询单个密钥的余额
@@ -278,8 +278,8 @@ func handleOpenAIBalance(ctx context.Context, baseURL string, apiKey string, cus
 	}
 
 	var result struct {
-		TotalGranted float64 `json:"total_granted"`
-		TotalUsed    float64 `json:"total_used"`
+		TotalGranted   float64 `json:"total_granted"`
+		TotalUsed      float64 `json:"total_used"`
 		TotalAvailable float64 `json:"total_available"`
 	}
 
@@ -522,14 +522,26 @@ func handleDeepSeekBalance(ctx context.Context, baseURL string, apiKey string, c
 		}, nil
 	}
 
+	// DeepSeek 余额查询 API 返回格式：
+	// {
+	//   "is_available": boolean,
+	//   "balance_infos": [
+	//     {
+	//       "currency": "CNY" | "USD",
+	//       "total_balance": "string",
+	//       "granted_balance": "string",
+	//       "topped_up_balance": "string"
+	//     }
+	//   ]
+	// }
 	var result struct {
-		Success bool `json:"success"`
-		Data    struct {
-			Balance     float64 `json:"balance"`
-			Currency    string  `json:"currency"`
-			GrantBalance float64 `json:"grant_balance"`
-			CashBalance float64 `json:"cash_balance"`
-		} `json:"data"`
+		IsAvailable  bool `json:"is_available"`
+		BalanceInfos []struct {
+			Currency        string `json:"currency"`
+			TotalBalance    string `json:"total_balance"`
+			GrantedBalance  string `json:"granted_balance"`
+			ToppedUpBalance string `json:"topped_up_balance"`
+		} `json:"balance_infos"`
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
@@ -539,16 +551,29 @@ func handleDeepSeekBalance(ctx context.Context, baseURL string, apiKey string, c
 		}, nil
 	}
 
-	balanceTotal := fmt.Sprintf("%.2f", result.Data.Balance)
-	if result.Data.GrantBalance > 0 || result.Data.CashBalance > 0 {
-		balanceTotal = fmt.Sprintf("%.2f", result.Data.GrantBalance+result.Data.CashBalance)
+	// 如果没有余额信息，返回失败
+	if len(result.BalanceInfos) == 0 {
+		return &BalanceInfo{
+			Success:      false,
+			ErrorMessage: "no balance info returned",
+		}, nil
+	}
+
+	// 取第一个余额信息（通常只有一个）
+	info := result.BalanceInfos[0]
+
+	// 状态：根据 is_available 字段判断账户是否可用
+	status := "available"
+	if !result.IsAvailable {
+		status = "unavailable"
 	}
 
 	return &BalanceInfo{
 		Success:      true,
-		BalanceTotal: balanceTotal,
+		BalanceTotal: info.TotalBalance,
 		BalanceUsed:  "N/A",
-		Currency:     result.Data.Currency,
+		Status:       status,
+		Currency:     info.Currency,
 	}, nil
 }
 
@@ -556,7 +581,7 @@ func handleDeepSeekBalance(ctx context.Context, baseURL string, apiKey string, c
 func handleMoonshotBalance(ctx context.Context, baseURL string, apiKey string, customPath string) (*BalanceInfo, error) {
 	balancePath := customPath
 	if balancePath == "" {
-		balancePath = "/v1/users/me"
+		balancePath = "/v1/users/me/balance"
 	}
 
 	reqURL := strings.TrimRight(baseURL, "/") + balancePath
@@ -589,13 +614,14 @@ func handleMoonshotBalance(ctx context.Context, baseURL string, apiKey string, c
 	}
 
 	var result struct {
+		Code int `json:"code"`
 		Data struct {
-			ID             string  `json:"id"`
-			TotalBalance   float64 `json:"total_balance"`
-			GrantedBalance float64 `json:"granted_balance"`
-			CashBalance    float64 `json:"cash_balance"`
-			Status         string  `json:"status"`
+			AvailableBalance float64 `json:"available_balance"`
+			VoucherBalance   float64 `json:"voucher_balance"`
+			CashBalance      float64 `json:"cash_balance"`
 		} `json:"data"`
+		SCode  string `json:"scode"`
+		Status bool   `json:"status"`
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
@@ -605,140 +631,27 @@ func handleMoonshotBalance(ctx context.Context, baseURL string, apiKey string, c
 		}, nil
 	}
 
-	balanceTotal := fmt.Sprintf("%.2f", result.Data.TotalBalance)
+	if result.Code != 0 || !result.Status {
+		errMsg := fmt.Sprintf("API returned code=%d, scode=%s, status=%t", result.Code, result.SCode, result.Status)
+		return &BalanceInfo{
+			Success:      false,
+			ErrorMessage: errMsg,
+		}, nil
+	}
 
 	return &BalanceInfo{
 		Success:      true,
-		BalanceTotal: balanceTotal,
+		BalanceTotal: fmt.Sprintf("%.5f", result.Data.AvailableBalance),
 		BalanceUsed:  "N/A",
-		Status:       result.Data.Status,
-		ID:           result.Data.ID,
+		Status:       result.SCode,
 		Currency:     "CNY",
 	}, nil
 }
 
-// handleBaichuanBalance 百川智能余额查询
-func handleBaichuanBalance(ctx context.Context, baseURL string, apiKey string, customPath string) (*BalanceInfo, error) {
-	balancePath := customPath
-	if balancePath == "" {
-		balancePath = "/v1/account/balance"
-	}
-
-	reqURL := strings.TrimRight(baseURL, "/") + balancePath
-
-	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
-	if err != nil {
-		return &BalanceInfo{
-			Success:      false,
-			ErrorMessage: fmt.Sprintf("failed to create request: %v", err),
-		}, nil
-	}
-
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := serviceHTTPClient.Do(req)
-	if err != nil {
-		return &BalanceInfo{
-			Success:      false,
-			ErrorMessage: fmt.Sprintf("request failed: %v", err),
-		}, nil
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return &BalanceInfo{
-			Success:      false,
-			ErrorMessage: fmt.Sprintf("HTTP %d", resp.StatusCode),
-		}, nil
-	}
-
-	var result struct {
-		Code    int    `json:"code"`
-		Message string `json:"message"`
-		Data    struct {
-			TotalBalance float64 `json:"total_balance"`
-			CashBalance  float64 `json:"cash_balance"`
-			Currency     string  `json:"currency"`
-		} `json:"data"`
-	}
-
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return &BalanceInfo{
-			Success:      false,
-			ErrorMessage: fmt.Sprintf("failed to parse response: %v", err),
-		}, nil
-	}
-
-	if result.Code != 0 {
-		return &BalanceInfo{
-			Success:      false,
-			ErrorMessage: result.Message,
-		}, nil
-	}
-
-	balanceTotal := fmt.Sprintf("%.2f", result.Data.TotalBalance)
-
+func handleUnsupportedBalance(ctx context.Context, baseURL string, apiKey string, customPath string) (*BalanceInfo, error) {
 	return &BalanceInfo{
-		Success:      true,
-		BalanceTotal: balanceTotal,
-		BalanceUsed:  "N/A",
-		Currency:     result.Data.Currency,
-	}, nil
-}
-
-// handleMiniMaxBalance MiniMax 余额查询
-func handleMiniMaxBalance(ctx context.Context, baseURL string, apiKey string, customPath string) (*BalanceInfo, error) {
-	balancePath := customPath
-	if balancePath == "" {
-		balancePath = "/v1/account/get_balance"
-	}
-
-	reqURL := strings.TrimRight(baseURL, "/") + balancePath
-
-	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
-	if err != nil {
-		return &BalanceInfo{
-			Success:      false,
-			ErrorMessage: fmt.Sprintf("failed to create request: %v", err),
-		}, nil
-	}
-
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := serviceHTTPClient.Do(req)
-	if err != nil {
-		return &BalanceInfo{
-			Success:      false,
-			ErrorMessage: fmt.Sprintf("request failed: %v", err),
-		}, nil
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return &BalanceInfo{
-			Success:      false,
-			ErrorMessage: fmt.Sprintf("HTTP %d", resp.StatusCode),
-		}, nil
-	}
-
-	var result struct {
-		Balance float64 `json:"balance"`
-	}
-
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return &BalanceInfo{
-			Success:      false,
-			ErrorMessage: fmt.Sprintf("failed to parse response: %v", err),
-		}, nil
-	}
-
-	return &BalanceInfo{
-		Success:      true,
-		BalanceTotal: fmt.Sprintf("%.2f", result.Balance),
-		BalanceUsed:  "N/A",
-		Currency:     "CNY",
+		Success:      false,
+		ErrorMessage: "当前渠道不支持余额查询",
 	}, nil
 }
 
@@ -746,83 +659,6 @@ func handleMiniMaxBalance(ctx context.Context, baseURL string, apiKey string, cu
 func handleSparkBalance(ctx context.Context, baseURL string, apiKey string, customPath string) (*BalanceInfo, error) {
 	// 讯飞使用不同的认证方式，这里使用默认处理器
 	return handleDefaultBalance(ctx, baseURL, apiKey, customPath)
-}
-
-// handleZhipuBalance 智谱 AI 余额查询
-func handleZhipuBalance(ctx context.Context, baseURL string, apiKey string, customPath string) (*BalanceInfo, error) {
-	balancePath := customPath
-	if balancePath == "" {
-		balancePath = "/api/paas/v4/balance"
-	}
-
-	reqURL := strings.TrimRight(baseURL, "/") + balancePath
-
-	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
-	if err != nil {
-		return &BalanceInfo{
-			Success:      false,
-			ErrorMessage: fmt.Sprintf("failed to create request: %v", err),
-		}, nil
-	}
-
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := serviceHTTPClient.Do(req)
-	if err != nil {
-		return &BalanceInfo{
-			Success:      false,
-			ErrorMessage: fmt.Sprintf("request failed: %v", err),
-		}, nil
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return &BalanceInfo{
-			Success:      false,
-			ErrorMessage: fmt.Sprintf("HTTP %d", resp.StatusCode),
-		}, nil
-	}
-
-	var result struct {
-		Code    int    `json:"code"`
-		Message string `json:"message"`
-		Data    struct {
-			TotalBalance float64 `json:"totalBalance"`
-			CashBalance  float64 `json:"cashBalance"`
-			GrantedBalance float64 `json:"grantedBalance"`
-			Currency     string  `json:"currency"`
-			Status       int     `json:"status"`
-		} `json:"data"`
-	}
-
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return &BalanceInfo{
-			Success:      false,
-			ErrorMessage: fmt.Sprintf("failed to parse response: %v", err),
-		}, nil
-	}
-
-	if result.Code != 200 {
-		return &BalanceInfo{
-			Success:      false,
-			ErrorMessage: result.Message,
-		}, nil
-	}
-
-	balanceTotal := fmt.Sprintf("%.2f", result.Data.TotalBalance)
-	status := "active"
-	if result.Data.Status != 1 {
-		status = "inactive"
-	}
-
-	return &BalanceInfo{
-		Success:      true,
-		BalanceTotal: balanceTotal,
-		BalanceUsed:  "N/A",
-		Status:       status,
-		Currency:     result.Data.Currency,
-	}, nil
 }
 
 // handleDashScopeBalance 通义千问余额查询
@@ -940,9 +776,9 @@ func handleAihubmixBalance(ctx context.Context, baseURL string, apiKey string, c
 	var result struct {
 		Success bool `json:"success"`
 		Data    struct {
-			Quota      int64  `json:"quota"`
-			UsedQuota  int64  `json:"used_quota"`
-			Username   string `json:"username"`
+			Quota       int64  `json:"quota"`
+			UsedQuota   int64  `json:"used_quota"`
+			Username    string `json:"username"`
 			DisplayName string `json:"display_name"`
 		} `json:"data"`
 		Message string `json:"message"`
@@ -1085,9 +921,9 @@ func LogBalanceQueryResult(apiKey *models.APIKey, balanceInfo *BalanceInfo, grou
 	}
 
 	fields := logrus.Fields{
-		"group":       groupName,
-		"key_id":      apiKey.ID,
-		"success":     balanceInfo.Success,
+		"group":   groupName,
+		"key_id":  apiKey.ID,
+		"success": balanceInfo.Success,
 	}
 
 	if balanceInfo.Success {
