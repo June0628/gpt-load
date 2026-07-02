@@ -296,6 +296,11 @@ func (ps *ProxyServer) executeRequestWithRetry(
 				logrus.Debugf("Request failed with status %d (attempt %d/%d) for key %s. Parsed Error: %s", statusCode, retryCount+1, maxRetries+1, utils.MaskAPIKey(apiKey.KeyValue), parsedError)
 			}
 
+			// 上游 key 可能出现在错误文本中（如 Gemini 通道将 key 放入 URL query，
+			// 传输层错误会把完整 URL 带入 err.Error()），返回客户端和落库前先脱敏
+			errorMessage = utils.RedactSecret(errorMessage, apiKey.KeyValue)
+			parsedError = utils.RedactSecret(parsedError, apiKey.KeyValue)
+
 			// 魔塔平台 429 需要区分两种错误：
 			// 1. "exceeded your current quota, please check your plan and billing details" -> 永久禁用密钥
 			// 2. "exceeded today's quota for model X" -> 今日禁用该模型，不触发密钥故障计数
