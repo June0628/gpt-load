@@ -133,20 +133,26 @@ func (s *MemoryStore) Get(key string) ([]byte, error) {
 	return item.value, nil
 }
 
-// Delete 根据键删除值
+// Delete 根据键删除值，同时清理对应的过期条目
 func (s *MemoryStore) Delete(key string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.muExpiries.Lock()
+	defer s.muExpiries.Unlock()
 	delete(s.data, key)
+	delete(s.expiries, key)
 	return nil
 }
 
-// Del 根据多个键删除值
+// Del 根据多个键删除值，同时清理对应的过期条目
 func (s *MemoryStore) Del(keys ...string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.muExpiries.Lock()
+	defer s.muExpiries.Unlock()
 	for _, key := range keys {
 		delete(s.data, key)
+		delete(s.expiries, key)
 	}
 	return nil
 }
@@ -210,8 +216,23 @@ func (s *MemoryStore) Expire(key string, ttl time.Duration) error {
 	return nil
 }
 
-// isExpiredByExpiry 检查通过 Expire 设置了 TTL 的 key 是否已过期（调用者需自行加锁检查）
+// isExpiredByExpiry 检查通过 Expire 设置了 TTL 的 key 是否已过期
 func (s *MemoryStore) isExpiredByExpiry(key string) bool {
+	s.muExpiries.RLock()
+	expiresAt, ok := s.expiries[key]
+	s.muExpiries.RUnlock()
+	if !ok {
+		return false
+	}
+	if expiresAt > 0 && time.Now().UnixNano() > expiresAt {
+		return true
+	}
+	return false
+}
+
+// isExpiredByExpiryLocked 检查通过 Expire 设置了 TTL 的 key 是否已过期
+// 调用者必须已持有 s.mu（读或写锁），此函数内部自行获取 muExpiries 读锁
+func (s *MemoryStore) isExpiredByExpiryLocked(key string) bool {
 	s.muExpiries.RLock()
 	expiresAt, ok := s.expiries[key]
 	s.muExpiries.RUnlock()
@@ -232,9 +253,14 @@ func (s *MemoryStore) HSet(key string, values map[string]any) error {
 
 	var hash map[string]string
 	rawHash, exists := s.data[key]
-	if !exists {
+	if !exists || s.isExpiredByExpiryLocked(key) {
 		hash = make(map[string]string)
 		s.data[key] = hash
+		if exists {
+			s.muExpiries.Lock()
+			delete(s.expiries, key)
+			s.muExpiries.Unlock()
+		}
 	} else {
 		var ok bool
 		hash, ok = rawHash.(map[string]string)
@@ -322,8 +348,13 @@ func (s *MemoryStore) LPush(key string, values ...any) error {
 
 	var list []string
 	rawList, exists := s.data[key]
-	if !exists {
+	if !exists || s.isExpiredByExpiryLocked(key) {
 		list = make([]string, 0)
+		if exists {
+			s.muExpiries.Lock()
+			delete(s.expiries, key)
+			s.muExpiries.Unlock()
+		}
 	} else {
 		var ok bool
 		list, ok = rawList.([]string)
@@ -347,6 +378,13 @@ func (s *MemoryStore) LRem(key string, count int64, value any) error {
 
 	rawList, exists := s.data[key]
 	if !exists {
+		return nil
+	}
+	if s.isExpiredByExpiryLocked(key) {
+		delete(s.data, key)
+		s.muExpiries.Lock()
+		delete(s.expiries, key)
+		s.muExpiries.Unlock()
 		return nil
 	}
 
@@ -377,6 +415,13 @@ func (s *MemoryStore) Rotate(key string) (string, error) {
 
 	rawList, exists := s.data[key]
 	if !exists {
+		return "", ErrNotFound
+	}
+	if s.isExpiredByExpiryLocked(key) {
+		delete(s.data, key)
+		s.muExpiries.Lock()
+		delete(s.expiries, key)
+		s.muExpiries.Unlock()
 		return "", ErrNotFound
 	}
 
@@ -414,6 +459,12 @@ func (s *MemoryStore) LLen(key string) (int64, error) {
 		return 0, fmt.Errorf("type mismatch: key '%s' holds a different data type", key)
 	}
 
+	// 检查过期，持有读锁时不能删除，只能返回 0
+	// 写操作（如 LRem、LPop）时会持有写锁清理过期 key
+	if s.isExpiredByExpiryLocked(key) {
+		return 0, nil
+	}
+
 	return int64(len(list)), nil
 }
 
@@ -426,9 +477,14 @@ func (s *MemoryStore) SAdd(key string, members ...any) error {
 
 	var set map[string]struct{}
 	rawSet, exists := s.data[key]
-	if !exists {
+	if !exists || s.isExpiredByExpiryLocked(key) {
 		set = make(map[string]struct{})
 		s.data[key] = set
+		if exists {
+			s.muExpiries.Lock()
+			delete(s.expiries, key)
+			s.muExpiries.Unlock()
+		}
 	} else {
 		var ok bool
 		set, ok = rawSet.(map[string]struct{})
@@ -450,6 +506,13 @@ func (s *MemoryStore) SPopN(key string, count int64) ([]string, error) {
 
 	rawSet, exists := s.data[key]
 	if !exists {
+		return []string{}, nil
+	}
+	if s.isExpiredByExpiryLocked(key) {
+		delete(s.data, key)
+		s.muExpiries.Lock()
+		delete(s.expiries, key)
+		s.muExpiries.Unlock()
 		return []string{}, nil
 	}
 

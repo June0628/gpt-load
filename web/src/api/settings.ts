@@ -43,4 +43,6 @@ export interface LogTableInfo {
   table_name: string;
   date: string;
   row_count: number;
+  size_bytes: number;
+  size_human: string;
 }

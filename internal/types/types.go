@@ -26,20 +26,25 @@ type SystemSettings struct {
 	EnableRequestBodyLogging       bool   `json:"enable_request_body_logging" default:"false" name:"config.enable_request_body_logging" category:"config.category.basic" desc:"config.enable_request_body_logging_desc"`
 	FeishuWebhookURL               string `json:"feishu_webhook_url" name:"config.feishu_webhook_url" category:"config.category.basic" desc:"config.feishu_webhook_url_desc"`
 
+	// 数据库大小监控配置
+	DBSizeMonitorEnabled       bool `json:"db_size_monitor_enabled" default:"false" name:"config.db_size_monitor_enabled" category:"config.category.basic" desc:"config.db_size_monitor_enabled_desc"`
+	DBSizeMonitorThresholdGB   int  `json:"db_size_monitor_threshold_gb" default:"10" name:"config.db_size_monitor_threshold_gb" category:"config.category.basic" desc:"config.db_size_monitor_threshold_gb_desc" validate:"min=0"`
+	DBSizeMonitorIntervalHours int  `json:"db_size_monitor_interval_hours" default:"6" name:"config.db_size_monitor_interval_hours" category:"config.category.basic" desc:"config.db_size_monitor_interval_hours_desc" validate:"required,min=1"`
+
 	// 日志上传配置
-	LogUploadEnabled               bool   `json:"log_upload_enabled" default:"false" name:"config.log_upload_enabled" category:"config.category.log_upload" desc:"config.log_upload_enabled_desc"`
-	LogUploadBeforeDelete          bool   `json:"log_upload_before_delete" default:"true" name:"config.log_upload_before_delete" category:"config.category.log_upload" desc:"config.log_upload_before_delete_desc"`
-	LogUploadDirectory             string `json:"log_upload_directory" default:"logs" name:"config.log_upload_directory" category:"config.category.log_upload" desc:"config.log_upload_directory_desc"`
-	LogUploadFilenamePrefix        string `json:"log_upload_filename_prefix" default:"gpt-load-logs" name:"config.log_upload_filename_prefix" category:"config.category.log_upload" desc:"config.log_upload_filename_prefix_desc"`
-	LogUploadProvider              string `json:"log_upload_provider" default:"tencent" name:"config.log_upload_provider" category:"config.category.log_upload" desc:"config.log_upload_provider_desc" validate:"required"`
-	LogUploadTencentSecretID       string `json:"log_upload_tencent_secret_id" name:"config.log_upload_tencent_secret_id" category:"config.category.log_upload" desc:"config.log_upload_tencent_secret_id_desc"`
-	LogUploadTencentSecretKey      string `json:"log_upload_tencent_secret_key" name:"config.log_upload_tencent_secret_key" category:"config.category.log_upload" desc:"config.log_upload_tencent_secret_key_desc"`
-	LogUploadTencentBucket         string `json:"log_upload_tencent_bucket" name:"config.log_upload_tencent_bucket" category:"config.category.log_upload" desc:"config.log_upload_tencent_bucket_desc"`
-	LogUploadTencentRegion         string `json:"log_upload_tencent_region" default:"ap-guangzhou" name:"config.log_upload_tencent_region" category:"config.category.log_upload" desc:"config.log_upload_tencent_region_desc"`
-	LogUploadWebDAVURL             string `json:"log_upload_webdav_url" name:"config.log_upload_webdav_url" category:"config.category.log_upload" desc:"config.log_upload_webdav_url_desc"`
-	LogUploadWebDAVUsername        string `json:"log_upload_webdav_username" name:"config.log_upload_webdav_username" category:"config.category.log_upload" desc:"config.log_upload_webdav_username_desc"`
-	LogUploadWebDAVPassword        string `json:"log_upload_webdav_password" name:"config.log_upload_webdav_password" category:"config.category.log_upload" desc:"config.log_upload_webdav_password_desc"`
-	LogUploadDeleteAfterManual     bool   `json:"log_upload_delete_after_manual" default:"false" name:"config.log_upload_delete_after_manual" category:"config.category.log_upload" desc:"config.log_upload_delete_after_manual_desc"`
+	LogUploadEnabled           bool   `json:"log_upload_enabled" default:"false" name:"config.log_upload_enabled" category:"config.category.log_upload" desc:"config.log_upload_enabled_desc"`
+	LogUploadBeforeDelete      bool   `json:"log_upload_before_delete" default:"true" name:"config.log_upload_before_delete" category:"config.category.log_upload" desc:"config.log_upload_before_delete_desc"`
+	LogUploadDirectory         string `json:"log_upload_directory" default:"logs" name:"config.log_upload_directory" category:"config.category.log_upload" desc:"config.log_upload_directory_desc"`
+	LogUploadFilenamePrefix    string `json:"log_upload_filename_prefix" default:"gpt-load-logs" name:"config.log_upload_filename_prefix" category:"config.category.log_upload" desc:"config.log_upload_filename_prefix_desc"`
+	LogUploadProvider          string `json:"log_upload_provider" default:"tencent" name:"config.log_upload_provider" category:"config.category.log_upload" desc:"config.log_upload_provider_desc" validate:"required"`
+	LogUploadTencentSecretID   string `json:"log_upload_tencent_secret_id" name:"config.log_upload_tencent_secret_id" category:"config.category.log_upload" desc:"config.log_upload_tencent_secret_id_desc"`
+	LogUploadTencentSecretKey  string `json:"log_upload_tencent_secret_key" name:"config.log_upload_tencent_secret_key" category:"config.category.log_upload" desc:"config.log_upload_tencent_secret_key_desc"`
+	LogUploadTencentBucket     string `json:"log_upload_tencent_bucket" name:"config.log_upload_tencent_bucket" category:"config.category.log_upload" desc:"config.log_upload_tencent_bucket_desc"`
+	LogUploadTencentRegion     string `json:"log_upload_tencent_region" default:"ap-guangzhou" name:"config.log_upload_tencent_region" category:"config.category.log_upload" desc:"config.log_upload_tencent_region_desc"`
+	LogUploadWebDAVURL         string `json:"log_upload_webdav_url" name:"config.log_upload_webdav_url" category:"config.category.log_upload" desc:"config.log_upload_webdav_url_desc"`
+	LogUploadWebDAVUsername    string `json:"log_upload_webdav_username" name:"config.log_upload_webdav_username" category:"config.category.log_upload" desc:"config.log_upload_webdav_username_desc"`
+	LogUploadWebDAVPassword    string `json:"log_upload_webdav_password" name:"config.log_upload_webdav_password" category:"config.category.log_upload" desc:"config.log_upload_webdav_password_desc"`
+	LogUploadDeleteAfterManual bool   `json:"log_upload_delete_after_manual" default:"false" name:"config.log_upload_delete_after_manual" category:"config.category.log_upload" desc:"config.log_upload_delete_after_manual_desc"`
 
 	// 请求设置
 	RequestTimeout        int    `json:"request_timeout" default:"600" name:"config.request_timeout" category:"config.category.request" desc:"config.request_timeout_desc" validate:"required,min=1"`
@@ -58,7 +63,7 @@ type SystemSettings struct {
 	KeyValidationConcurrency     int    `json:"key_validation_concurrency" default:"10" name:"config.key_validation_concurrency" category:"config.category.key" desc:"config.key_validation_concurrency_desc" validate:"required,min=1"`
 	KeyValidationTimeoutSeconds  int    `json:"key_validation_timeout_seconds" default:"20" name:"config.key_validation_timeout" category:"config.category.key" desc:"config.key_validation_timeout_desc" validate:"required,min=1"`
 	// 余额查询独立间隔配置
-	BalanceQueryIntervalMinutes  int    `json:"balance_query_interval_minutes" default:"60" name:"config.balance_query_interval" category:"config.category.key" desc:"config.balance_query_interval_desc" validate:"required,min=1"`
+	BalanceQueryIntervalMinutes int `json:"balance_query_interval_minutes" default:"60" name:"config.balance_query_interval" category:"config.category.key" desc:"config.balance_query_interval_desc" validate:"required,min=1"`
 
 	// 通知配置
 	InvalidKeyCountThreshold int `json:"invalid_key_count_threshold" default:"0" name:"config.invalid_key_count_threshold" category:"config.category.key" desc:"config.invalid_key_count_threshold_desc" validate:"min=0"`
@@ -108,16 +113,16 @@ type LogConfig struct {
 // LogUploadConfig 表示外部存储的日志上传配置
 type LogUploadConfig struct {
 	// 通用设置
-	EnableAutoUpload    bool   `json:"enable_auto_upload"`
-	UploadBeforeDelete  bool   `json:"upload_before_delete"`
-	UploadDirectory     string `json:"upload_directory"`
+	EnableAutoUpload     bool   `json:"enable_auto_upload"`
+	UploadBeforeDelete   bool   `json:"upload_before_delete"`
+	UploadDirectory      string `json:"upload_directory"`
 	UploadFilenamePrefix string `json:"upload_filename_prefix"`
 
 	// 腾讯 COS 设置
-	TencentSecretID     string `json:"tencent_secret_id"`
-	TencentSecretKey    string `json:"tencent_secret_key"`
-	TencentCOSBucket    string `json:"tencent_cos_bucket"`
-	TencentCOSRegion    string `json:"tencent_cos_region"`
+	TencentSecretID  string `json:"tencent_secret_id"`
+	TencentSecretKey string `json:"tencent_secret_key"`
+	TencentCOSBucket string `json:"tencent_cos_bucket"`
+	TencentCOSRegion string `json:"tencent_cos_region"`
 
 	// WebDAV 设置
 	WebDAVURL      string `json:"webdav_url"`

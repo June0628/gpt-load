@@ -64,6 +64,11 @@ func (s *CacheSyncer[T]) Get() T {
 // 本地缓存同步更新确保发起变更的实例立即生效；
 // 如果发布通知失败，仅影响其他实例的缓存同步，本地缓存已正确更新。
 func (s *CacheSyncer[T]) Invalidate() error {
+	// 先同步重载本地缓存，确保发起变更的实例立即生效
+	if err := s.reload(); err != nil {
+		return err
+	}
+
 	s.logger.Debug("publishing invalidation notification")
 	return s.store.Publish(s.channelName, []byte("reload"))
 }

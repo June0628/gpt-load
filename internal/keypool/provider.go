@@ -271,6 +271,11 @@ func (p *KeyProvider) handleSuccess(keyID uint, keyHashKey, activeKeysListKey st
 		return nil
 	}
 
+	// 如果 failure_count 为 0 但被禁用，说明不是因为调用失败（可能是每日限制等原因），不应恢复
+	if failureCount == 0 && !isActive {
+		return nil
+	}
+
 	needRecover := false
 	err = p.executeTransactionWithRetry(func(tx *gorm.DB) error {
 		var key models.APIKey
@@ -295,6 +300,8 @@ func (p *KeyProvider) handleSuccess(keyID uint, keyHashKey, activeKeysListKey st
 	}
 
 	// 事务提交后重读 DB 最终状态，避免并发 handleFailure 的缓存写入覆盖正确的 success 状态
+	// 注意：重读与另一个并发 handleSuccess/handleFailure 之间仍存在微小竞态窗口，
+	// 但最终一致性由下次请求的 CheckDailyRequestLimit / handleFailure 修正，当前场景可接受
 	var finalKey models.APIKey
 	if err := p.db.First(&finalKey, keyID).Error; err != nil {
 		logrus.WithFields(logrus.Fields{"keyID": keyID, "error": err}).Warn("Failed to re-read key from DB for cache sync, using transaction values")
@@ -371,6 +378,8 @@ func (p *KeyProvider) handleFailure(apiKey *models.APIKey, group *models.Group, 
 	}
 
 	// 事务提交后重读 DB 最终状态，避免并发 handleSuccess 的缓存写入覆盖正确的 failure 状态
+	// 注意：重读与另一个并发 handleSuccess/handleFailure 之间仍存在微小竞态窗口，
+	// 但最终一致性由下次请求的 CheckDailyRequestLimit / handleSuccess 修正，当前场景可接受
 	var finalKey models.APIKey
 	if err := p.db.First(&finalKey, apiKey.ID).Error; err != nil {
 		logrus.WithFields(logrus.Fields{"keyID": apiKey.ID, "error": err}).Warn("Failed to re-read key from DB for cache sync, using transaction values")

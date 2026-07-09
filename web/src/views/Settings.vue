@@ -39,7 +39,7 @@ const isUploading = ref(false);
 
 const logTableOptions = computed(() =>
   logTables.value.map(table => ({
-    label: `${table.date}  (${table.row_count.toLocaleString()} ${t("settings.rowsUnit")})`,
+    label: `${table.date}  (${table.row_count.toLocaleString()} ${t("settings.rowsUnit")}, ${table.size_human})`,
     value: table.table_name,
   }))
 );

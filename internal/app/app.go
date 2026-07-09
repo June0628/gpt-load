@@ -27,56 +27,59 @@ import (
 
 // App 持有所有服务并管理应用生命周期。
 type App struct {
-	engine            *gin.Engine
-	configManager     types.ConfigManager
-	settingsManager   *config.SystemSettingsManager
-	groupManager      *services.GroupManager
-	logCleanupService *services.LogCleanupService
-	logUploadService  *services.LogUploadService
-	requestLogService *services.RequestLogService
-	cronChecker       *keypool.CronChecker
-	keyPoolProvider   *keypool.KeyProvider
-	keyService        *services.KeyService
-	proxyServer       *proxy.ProxyServer
-	storage           store.Store
-	db                *gorm.DB
-	httpServer        *http.Server
+	engine               *gin.Engine
+	configManager        types.ConfigManager
+	settingsManager      *config.SystemSettingsManager
+	groupManager         *services.GroupManager
+	logCleanupService    *services.LogCleanupService
+	logUploadService     *services.LogUploadService
+	dbSizeMonitorService *services.DBSizeMonitorService
+	requestLogService    *services.RequestLogService
+	cronChecker          *keypool.CronChecker
+	keyPoolProvider      *keypool.KeyProvider
+	keyService           *services.KeyService
+	proxyServer          *proxy.ProxyServer
+	storage              store.Store
+	db                   *gorm.DB
+	httpServer           *http.Server
 }
 
 // AppParams 定义 App 的依赖项。
 type AppParams struct {
 	dig.In
-	Engine            *gin.Engine
-	ConfigManager     types.ConfigManager
-	SettingsManager   *config.SystemSettingsManager
-	GroupManager      *services.GroupManager
-	LogCleanupService *services.LogCleanupService
-	LogUploadService  *services.LogUploadService
-	RequestLogService *services.RequestLogService
-	CronChecker       *keypool.CronChecker
-	KeyPoolProvider   *keypool.KeyProvider
-	KeyService        *services.KeyService
-	ProxyServer       *proxy.ProxyServer
-	Storage           store.Store
-	DB                *gorm.DB
+	Engine               *gin.Engine
+	ConfigManager        types.ConfigManager
+	SettingsManager      *config.SystemSettingsManager
+	GroupManager         *services.GroupManager
+	LogCleanupService    *services.LogCleanupService
+	LogUploadService     *services.LogUploadService
+	DBSizeMonitorService *services.DBSizeMonitorService
+	RequestLogService    *services.RequestLogService
+	CronChecker          *keypool.CronChecker
+	KeyPoolProvider      *keypool.KeyProvider
+	KeyService           *services.KeyService
+	ProxyServer          *proxy.ProxyServer
+	Storage              store.Store
+	DB                   *gorm.DB
 }
 
 // NewApp 是 App 的构造函数，通过 dig 注入依赖。
 func NewApp(params AppParams) *App {
 	return &App{
-		engine:            params.Engine,
-		configManager:     params.ConfigManager,
-		settingsManager:   params.SettingsManager,
-		groupManager:      params.GroupManager,
-		logCleanupService: params.LogCleanupService,
-		logUploadService:  params.LogUploadService,
-		requestLogService: params.RequestLogService,
-		cronChecker:       params.CronChecker,
-		keyPoolProvider:   params.KeyPoolProvider,
-		keyService:        params.KeyService,
-		proxyServer:       params.ProxyServer,
-		storage:           params.Storage,
-		db:                params.DB,
+		engine:               params.Engine,
+		configManager:        params.ConfigManager,
+		settingsManager:      params.SettingsManager,
+		groupManager:         params.GroupManager,
+		logCleanupService:    params.LogCleanupService,
+		logUploadService:     params.LogUploadService,
+		dbSizeMonitorService: params.DBSizeMonitorService,
+		requestLogService:    params.RequestLogService,
+		cronChecker:          params.CronChecker,
+		keyPoolProvider:      params.KeyPoolProvider,
+		keyService:           params.KeyService,
+		proxyServer:          params.ProxyServer,
+		storage:              params.Storage,
+		db:                   params.DB,
 	}
 }
 
@@ -138,6 +141,7 @@ func (a *App) Start() error {
 		a.requestLogService.Start()
 		a.logCleanupService.Start()
 		a.logUploadService.Start()
+		a.dbSizeMonitorService.Start()
 		a.cronChecker.Start()
 	} else {
 		logrus.Info("Starting as Slave Node.")
@@ -205,6 +209,7 @@ func (a *App) Stop(ctx context.Context) {
 			a.cronChecker.Stop,
 			a.logCleanupService.Stop,
 			a.logUploadService.Stop,
+			a.dbSizeMonitorService.Stop,
 			a.requestLogService.Stop,
 		)
 	}

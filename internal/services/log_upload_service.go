@@ -122,8 +122,12 @@ func (s *LogUploadService) UploadAndDeleteTable(tableName string) error {
 	return nil
 }
 
+// maxUploadPartSizeBytes 单个上传分卷的最大大小（1GB）
+const maxUploadPartSizeBytes int64 = 1 * 1024 * 1024 * 1024
+
 // uploadTableLocked 内部实现，调用者需持有 s.mu 锁
 // 使用流式上传，不再生成临时文件
+// 如果表大小超过 1GB，自动拆分为多个分卷上传
 func (s *LogUploadService) uploadTableLocked(tableName string) error {
 	// 防御性校验：只允许 request_logs_YYYYMMDD 格式的表名，避免 SQL 注入
 	if !utils.ValidateLogTableName(tableName) {
@@ -148,6 +152,23 @@ func (s *LogUploadService) uploadTableLocked(tableName string) error {
 		return ErrEmptyTableSkipped
 	}
 
+	// 检查表大小，如果超过 1GB 则分卷上传
+	tableSizeBytes, err := utils.GetTableSizeBytes(s.db, tableName)
+	if err != nil {
+		logrus.WithError(err).WithField("table", tableName).Warn("Failed to get table size, falling back to single upload")
+		tableSizeBytes = 0
+	}
+
+	if tableSizeBytes > maxUploadPartSizeBytes {
+		logrus.WithFields(logrus.Fields{
+			"table":      tableName,
+			"size_bytes": tableSizeBytes,
+			"size_human": utils.FormatBytes(tableSizeBytes),
+			"row_count":  count,
+		}).Info("Table size exceeds 1GB, uploading in parts")
+		return s.uploadTableInParts(tableName, count, tableSizeBytes, settings)
+	}
+
 	// 生成文件名
 	filename := s.generateFilename(tableName, settings)
 
@@ -157,7 +178,6 @@ func (s *LogUploadService) uploadTableLocked(tableName string) error {
 	case "tencent", "cos", "tencent_cos":
 		return s.uploadTableToTencentCOSStream(tableName, filename, settings)
 	case "webdav":
-		// 流式上传已禁用，WebDAV 使用 gzip 压缩临时文件上传
 		return s.uploadTableToWebDAVWithGzipTempFile(tableName, filename, settings)
 	default:
 		return fmt.Errorf("未知上传提供商: %s", provider)
@@ -295,6 +315,207 @@ func (s *LogUploadService) generateFilename(tableName string, settings types.Sys
 	}
 
 	return fmt.Sprintf("%s%s-%s.csv", directory, prefix, dateStr)
+}
+
+// generateSplitFilename generates a filename for split uploads.
+// Format: gpt-load-logs-2026-07-02.csv.gz.000, gpt-load-logs-2026-07-02.csv.gz.001, ...
+func (s *LogUploadService) generateSplitFilename(tableName string, settings types.SystemSettings, partNum int) string {
+	base := s.generateFilename(tableName, settings)
+	return fmt.Sprintf("%s.gz.%03d", base, partNum)
+}
+
+// exportTableToCSVFileWithLimit exports a subset of rows to a CSV temp file using LIMIT/OFFSET.
+func (s *LogUploadService) exportTableToCSVFileWithLimit(tableName string, offset, limit int) (string, int, error) {
+	tmpFile, err := os.CreateTemp("", "gpt-load-csv-*.csv")
+	if err != nil {
+		return "", 0, fmt.Errorf("create temp file failed: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+
+	rows, err := s.db.Table(tableName).Limit(limit).Offset(offset).Rows()
+	if err != nil {
+		tmpFile.Close()
+		os.Remove(tmpPath)
+		return "", 0, fmt.Errorf("query table %s failed: %w", tableName, err)
+	}
+	defer rows.Close()
+
+	columns, err := rows.Columns()
+	if err != nil {
+		tmpFile.Close()
+		os.Remove(tmpPath)
+		return "", 0, fmt.Errorf("get columns failed: %w", err)
+	}
+
+	writer := csv.NewWriter(tmpFile)
+	if err := writer.Write(columns); err != nil {
+		tmpFile.Close()
+		os.Remove(tmpPath)
+		return "", 0, fmt.Errorf("write CSV header failed: %w", err)
+	}
+
+	values := make([]interface{}, len(columns))
+	valuePtrs := make([]interface{}, len(columns))
+	for i := range values {
+		valuePtrs[i] = &values[i]
+	}
+
+	rowCount := 0
+	for rows.Next() {
+		if err := rows.Scan(valuePtrs...); err != nil {
+			tmpFile.Close()
+			os.Remove(tmpPath)
+			return "", 0, fmt.Errorf("scan row failed: %w", err)
+		}
+		record := make([]string, len(columns))
+		for i, val := range values {
+			if val == nil {
+				record[i] = ""
+				continue
+			}
+			switch v := val.(type) {
+			case []byte:
+				record[i] = string(v)
+			case time.Time:
+				record[i] = v.Format(time.RFC3339)
+			default:
+				record[i] = fmt.Sprintf("%v", v)
+			}
+			record[i] = sanitizeCSVCell(record[i])
+		}
+		if err := writer.Write(record); err != nil {
+			tmpFile.Close()
+			os.Remove(tmpPath)
+			return "", 0, fmt.Errorf("write CSV row failed: %w", err)
+		}
+		rowCount++
+	}
+
+	writer.Flush()
+	if err := writer.Error(); err != nil {
+		tmpFile.Close()
+		os.Remove(tmpPath)
+		return "", 0, fmt.Errorf("CSV writer flush error: %w", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		os.Remove(tmpPath)
+		return "", 0, fmt.Errorf("close temp file failed: %w", err)
+	}
+
+	logrus.WithFields(logrus.Fields{"table": tableName, "offset": offset, "limit": limit, "rows": rowCount, "tmp_file": tmpPath}).Info("Exported table part to CSV temp file")
+	return tmpPath, rowCount, nil
+}
+
+// uploadTableInParts splits a large table into parts and uploads each part separately.
+// Each part is approximately 1GB in raw table size.
+// Every part is exported as CSV, gzip-compressed, then uploaded as:
+//
+//	gpt-load-logs-2026-07-02.csv.gz.000, gpt-load-logs-2026-07-02.csv.gz.001, ...
+//
+// Each .csv.gz.NNN is a self-contained gzip file that can be decompressed independently.
+func (s *LogUploadService) uploadTableInParts(tableName string, totalRows int64, tableSizeBytes int64, settings types.SystemSettings) error {
+	numParts := int(tableSizeBytes / maxUploadPartSizeBytes)
+	if tableSizeBytes%maxUploadPartSizeBytes != 0 {
+		numParts++
+	}
+	if numParts < 1 {
+		numParts = 1
+	}
+
+	rowsPerPart := int(totalRows) / numParts
+	if int(totalRows)%numParts != 0 {
+		rowsPerPart++
+	}
+	if rowsPerPart < 1 {
+		rowsPerPart = 1
+	}
+
+	logrus.WithFields(logrus.Fields{
+		"table":         tableName,
+		"total_rows":    totalRows,
+		"size_human":    utils.FormatBytes(tableSizeBytes),
+		"num_parts":     numParts,
+		"rows_per_part": rowsPerPart,
+	}).Info("Starting split upload (each part will be gzip-compressed)")
+
+	provider := strings.ToLower(settings.LogUploadProvider)
+
+	for partIdx := 0; partIdx < numParts; partIdx++ {
+		offset := partIdx * rowsPerPart
+		limit := rowsPerPart
+		if partIdx == numParts-1 {
+			limit = int(totalRows) - offset
+			if limit < 0 {
+				limit = 0
+			}
+		}
+
+		if limit == 0 {
+			continue
+		}
+
+		filename := s.generateSplitFilename(tableName, settings, partIdx)
+
+		logrus.WithFields(logrus.Fields{
+			"table":    tableName,
+			"part":     partIdx,
+			"of":       numParts,
+			"offset":   offset,
+			"limit":    limit,
+			"filename": filename,
+		}).Info("Uploading table part")
+
+		tmpCSV, rowCount, err := s.exportTableToCSVFileWithLimit(tableName, offset, limit)
+		if err != nil {
+			return fmt.Errorf("export part %d/%d failed: %w", partIdx, numParts, err)
+		}
+
+		if rowCount == 0 {
+			os.Remove(tmpCSV)
+			continue
+		}
+
+		gzipFile := tmpCSV + ".gz"
+		if gzErr := s.compressGzip(tmpCSV, gzipFile); gzErr != nil {
+			os.Remove(tmpCSV)
+			return fmt.Errorf("gzip part %d/%d failed: %w", partIdx, numParts, gzErr)
+		}
+		os.Remove(tmpCSV)
+
+		var uploadErr error
+		switch provider {
+		case "tencent", "cos", "tencent_cos":
+			uploadErr = s.uploadFileToTencentCOS(gzipFile, filename, settings)
+		case "webdav":
+			gzInfo, _ := os.Stat(gzipFile)
+			uploadErr = s.uploadFileToWebDAV(gzipFile, filename, settings)
+			if uploadErr == nil && gzInfo != nil {
+				uploadErr = s.verifyWebDAVUpload(filename, gzInfo.Size(), settings)
+			}
+		default:
+			uploadErr = fmt.Errorf("unknown upload provider: %s", provider)
+		}
+
+		os.Remove(gzipFile)
+
+		if uploadErr != nil {
+			return fmt.Errorf("upload part %d/%d failed: %w", partIdx, numParts, uploadErr)
+		}
+
+		logrus.WithFields(logrus.Fields{
+			"table":    tableName,
+			"part":     partIdx,
+			"of":       numParts,
+			"rows":     rowCount,
+			"filename": filename,
+		}).Info("Table part uploaded successfully")
+	}
+
+	logrus.WithFields(logrus.Fields{
+		"table":     tableName,
+		"num_parts": numParts,
+	}).Info("All table parts uploaded successfully")
+	return nil
 }
 
 // ============================================================
@@ -693,10 +914,10 @@ func (s *LogUploadService) verifyWebDAVUpload(filename string, expectedSize int6
 	defer resp.Body.Close()
 
 	logrus.WithFields(logrus.Fields{
-		"verify_url":         verifyURL,
-		"status_code":        resp.StatusCode,
-		"content_length":     resp.ContentLength,
-		"expected_size":      expectedSize,
+		"verify_url":     verifyURL,
+		"status_code":    resp.StatusCode,
+		"content_length": resp.ContentLength,
+		"expected_size":  expectedSize,
 	}).Info("WebDAV 验证响应")
 
 	// HEAD 请求成功状态码：200 或 207（PROPFIND 风格）
@@ -720,9 +941,9 @@ func (s *LogUploadService) verifyWebDAVUpload(filename string, expectedSize int6
 	// 校验文件大小（部分 WebDAV 服务器可能不返回 Content-Length，此时仅校验存在性）
 	if resp.ContentLength >= 0 && resp.ContentLength != expectedSize {
 		logrus.WithFields(logrus.Fields{
-			"verify_url":     verifyURL,
-			"expected_size":  expectedSize,
-			"actual_size":    resp.ContentLength,
+			"verify_url":    verifyURL,
+			"expected_size": expectedSize,
+			"actual_size":   resp.ContentLength,
 		}).Error("WebDAV 验证失败，文件大小不匹配")
 		return fmt.Errorf("WebDAV 验证失败，文件大小不匹配: 期望 %d, 实际 %d", expectedSize, resp.ContentLength)
 	}
@@ -997,9 +1218,9 @@ func (s *LogUploadService) ensureWebDAVDirectory(filename string, settings types
 	dirPath := filename[:idx] // 例如 "logs"
 
 	logrus.WithFields(logrus.Fields{
-		"dir_path":  dirPath,
-		"base_url":  baseURL,
-		"filename":  filename,
+		"dir_path": dirPath,
+		"base_url": baseURL,
+		"filename": filename,
 	}).Info("开始逐级创建 WebDAV 目录")
 
 	client := &http.Client{Timeout: 30 * time.Second}
@@ -1015,10 +1236,10 @@ func (s *LogUploadService) ensureWebDAVDirectory(filename string, settings types
 		mkcolURL := baseURL + strings.TrimPrefix(current, "/") + "/"
 
 		logrus.WithFields(logrus.Fields{
-			"level":       i + 1,
-			"part":        part,
+			"level":        i + 1,
+			"part":         part,
 			"current_path": current,
-			"mkcol_url":   mkcolURL,
+			"mkcol_url":    mkcolURL,
 		}).Info("尝试 MKCOL 创建目录")
 
 		req, err := http.NewRequest("MKCOL", mkcolURL, nil)

@@ -43,13 +43,16 @@ func (ps *ProxyServer) handleStreamingResponse(c *gin.Context, resp *http.Respon
 	for {
 		n, err := resp.Body.Read(buf)
 		if n > 0 {
+			// 先转发给客户端保证低延迟，再写入临时文件用于日志记录
 			if _, writeErr := c.Writer.Write(buf[:n]); writeErr != nil {
 				logUpstreamError("writing stream to client", writeErr)
-				// 客户端断开，仍需读取已捕获的内容用于日志
+				// 客户端断开：将当前已读取但未写入的 chunk 补写入临时文件，确保日志完整
+				if _, fileErr := tmpFile.Write(buf[:n]); fileErr != nil {
+					logUpstreamError("writing remaining stream to temp file", fileErr)
+				}
 				return ps.readAndProcessTempFile(tmpFile, resp.Header)
 			}
 			flusher.Flush()
-			// 写入临时文件用于后续日志记录
 			if _, fileErr := tmpFile.Write(buf[:n]); fileErr != nil {
 				logUpstreamError("writing stream to temp file", fileErr)
 			}
@@ -74,8 +77,11 @@ func (ps *ProxyServer) handleStreamingResponseInMemory(c *gin.Context, resp *htt
 	for {
 		n, err := resp.Body.Read(buf)
 		if n > 0 {
+			// 先转发给客户端保证低延迟，再写入捕获 buffer 用于日志记录
 			if _, writeErr := c.Writer.Write(buf[:n]); writeErr != nil {
 				logUpstreamError("writing stream to client", writeErr)
+				// 客户端断开：补写当前 chunk 到捕获 buffer，确保日志完整
+				captured.Write(buf[:n])
 				return ps.decompressAndEncode(captured.Bytes(), resp.Header)
 			}
 			flusher.Flush()

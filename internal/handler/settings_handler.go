@@ -92,6 +92,8 @@ type LogTableInfo struct {
 	TableName string `json:"table_name"`
 	Date      string `json:"date"`
 	RowCount  int64  `json:"row_count"`
+	SizeBytes int64  `json:"size_bytes"`
+	SizeHuman string `json:"size_human"`
 }
 
 // GetLogTables 处理 GET /api/settings/log-tables，获取所有存在的日志表列表
@@ -151,10 +153,14 @@ func (s *Server) GetLogTables(c *gin.Context) {
 			count = 0
 		}
 
+		sizeBytes, _ := utils.GetTableSizeBytes(db.DB, table)
+
 		tableInfos = append(tableInfos, LogTableInfo{
 			TableName: table,
 			Date:      dateStr,
 			RowCount:  count,
+			SizeBytes: sizeBytes,
+			SizeHuman: utils.FormatBytes(sizeBytes),
 		})
 	}
 

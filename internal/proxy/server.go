@@ -271,16 +271,16 @@ func (ps *ProxyServer) executeRequestWithRetry(
 			var errorMessage string
 			var parsedError string
 
-		if err != nil {
-			// client.Do 返回非 nil err 时仍可能返回非 nil resp（如重定向错误），需关闭 Body 避免 TCP 连接无法复用
-			if resp != nil {
-				resp.Body.Close()
-			}
-			statusCode = 500
-			errorMessage = err.Error()
-			parsedError = errorMessage
-			logrus.Debugf("Request failed (attempt %d/%d) for key %s: %v", retryCount+1, maxRetries+1, utils.MaskAPIKey(apiKey.KeyValue), err)
-		} else {
+			if err != nil {
+				// client.Do 返回非 nil err 时仍可能返回非 nil resp（如重定向错误），需关闭 Body 避免 TCP 连接无法复用
+				if resp != nil {
+					resp.Body.Close()
+				}
+				statusCode = 500
+				errorMessage = err.Error()
+				parsedError = errorMessage
+				logrus.Debugf("Request failed (attempt %d/%d) for key %s: %v", retryCount+1, maxRetries+1, utils.MaskAPIKey(apiKey.KeyValue), err)
+			} else {
 				// 可重试的上游响应（HTTP状态码匹配故障转移策略）
 				statusCode = resp.StatusCode
 				errorBody, readErr := io.ReadAll(resp.Body)
@@ -396,6 +396,10 @@ func (ps *ProxyServer) executeRequestWithRetry(
 		// 增加每日请求计数
 		ps.keyProvider.IncrementDailyRequestCount(apiKey, group)
 
+		// 请求成功时重置密钥失败计数，避免失败次数持续累积
+		// 注意：只在本次实际处理了请求时才重置（abuse/429 等情况不算真正成功）
+		ps.keyProvider.UpdateStatus(apiKey, group, true, "")
+
 		// 魔塔平台：从响应头更新模型维度剩余次数
 		if keypool.IsModelScopeUpstream(upstreamURL) && modelName != "" {
 			if remaining := resp.Header.Get(keypool.ModelScopeHeaderRemaining); remaining != "" {
@@ -489,8 +493,8 @@ func (ps *ProxyServer) logRequest(
 		UpstreamAddr: utils.TruncateString(upstreamAddr, 500),
 		RequestBody:  requestBodyToLog,
 		AgentFiles:   agentFilesToLog,
-		ToolCalls:     toolCallsToLog,
-		ResponseBody:  responseBody,
+		ToolCalls:    toolCallsToLog,
+		ResponseBody: responseBody,
 	}
 
 	// 设置父组
