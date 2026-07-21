@@ -5,7 +5,9 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -26,76 +28,121 @@ type Config struct {
 	ForceAttemptHTTP2     bool
 	TLSHandshakeTimeout   time.Duration
 	ExpectContinueTimeout time.Duration
-	ProxyURL              string
+	// ProxyURL 支持单个代理地址或逗号分隔的多个代理地址。
+	// 多个代理地址会通过轮询方式使用，例如：
+	//   "http://proxy1:8080,socks5://proxy2:1080"
+	// 为空时使用环境变量（HTTP_PROXY/HTTPS_PROXY）配置。
+	ProxyURL string
 }
 
-// HTTPClientManager 管理 HTTP 客户端的生命周期。
-// 基于配置指纹创建和缓存客户端，确保相同配置的客户端被复用。
-type HTTPClientManager struct {
-	clients map[string]*http.Client
-	lock    sync.RWMutex
+// ProxyClientPool 管理一个或多个 HTTP 客户端，支持轮询选择。
+// 当配置了多个代理地址时，每个代理地址对应一个独立的 http.Client，
+// 通过原子计数器实现平滑轮询。
+type ProxyClientPool struct {
+	clients []*http.Client
+	counter uint64
 }
 
-// RemoveClient 根据指纹关闭并移除缓存的客户端。
-// 如果未找到客户端则返回 false。
-func (m *HTTPClientManager) RemoveClient(fingerprint string) bool {
-	m.lock.Lock()
-	defer m.lock.Unlock()
-	client, exists := m.clients[fingerprint]
-	if !exists {
-		return false
+// GetClient 通过原子轮询返回下一个 HTTP 客户端。
+// 如果池中只有一个客户端，直接返回该客户端（零开销）。
+func (p *ProxyClientPool) GetClient() *http.Client {
+	if len(p.clients) == 1 {
+		return p.clients[0]
 	}
-	// 关闭 transport 以释放底层连接
-	if transport, ok := client.Transport.(*http.Transport); ok {
-		transport.CloseIdleConnections()
-	}
-	delete(m.clients, fingerprint)
-	return true
+	idx := atomic.AddUint64(&p.counter, 1)
+	return p.clients[idx%uint64(len(p.clients))]
 }
 
-// Close 关闭所有缓存的客户端并释放底层连接。
-func (m *HTTPClientManager) Close() {
-	m.lock.Lock()
-	defer m.lock.Unlock()
-	for _, client := range m.clients {
+// Close 关闭池中所有客户端的底层连接。
+func (p *ProxyClientPool) Close() {
+	for _, client := range p.clients {
 		if transport, ok := client.Transport.(*http.Transport); ok {
 			transport.CloseIdleConnections()
 		}
 	}
-	m.clients = make(map[string]*http.Client)
+}
+
+// HTTPClientManager 管理 HTTP 客户端池的生命周期。
+// 基于配置指纹创建和缓存客户端池，确保相同配置的池被复用。
+type HTTPClientManager struct {
+	pools map[string]*ProxyClientPool
+	lock  sync.RWMutex
+}
+
+// RemoveClient 根据指纹关闭并移除缓存的客户端池。
+// 如果未找到池则返回 false。
+func (m *HTTPClientManager) RemoveClient(fingerprint string) bool {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+	pool, exists := m.pools[fingerprint]
+	if !exists {
+		return false
+	}
+	pool.Close()
+	delete(m.pools, fingerprint)
+	return true
+}
+
+// Close 关闭所有缓存的客户端池并释放底层连接。
+func (m *HTTPClientManager) Close() {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+	for _, pool := range m.pools {
+		pool.Close()
+	}
+	m.pools = make(map[string]*ProxyClientPool)
 }
 
 // NewHTTPClientManager 创建新的客户端管理器。
 func NewHTTPClientManager() *HTTPClientManager {
 	return &HTTPClientManager{
-		clients: make(map[string]*http.Client),
+		pools: make(map[string]*ProxyClientPool),
 	}
 }
 
-// GetClient 返回匹配给定配置的 HTTP 客户端。
-// 如果缓存中已存在匹配的客户端则直接返回。
-// 否则创建新客户端、缓存并返回。
-func (m *HTTPClientManager) GetClient(config *Config) *http.Client {
+// GetClient 返回匹配给定配置的 HTTP 客户端池。
+// 如果缓存中已存在匹配的池则直接返回。
+// 否则创建新池、缓存并返回。
+//
+// 当 ProxyURL 包含逗号分隔的多个地址时，会为每个代理地址
+// 创建独立的 http.Client 并封装到池中，通过轮询方式使用。
+func (m *HTTPClientManager) GetClient(config *Config) *ProxyClientPool {
 	fingerprint := config.getFingerprint()
 
 	// 快速路径：读锁
 	m.lock.RLock()
-	client, exists := m.clients[fingerprint]
+	pool, exists := m.pools[fingerprint]
 	m.lock.RUnlock()
 	if exists {
-		return client
+		return pool
 	}
 
 	// 慢速路径：写锁
 	m.lock.Lock()
 	defer m.lock.Unlock()
 
-	// 双重检查，防止等待锁期间其他 goroutine 已创建客户端。
-	if client, exists = m.clients[fingerprint]; exists {
-		return client
+	// 双重检查，防止等待锁期间其他 goroutine 已创建池。
+	if pool, exists = m.pools[fingerprint]; exists {
+		return pool
 	}
 
-	// 使用指定配置创建新的 transport 和 client。
+	// 解析代理 URL 列表
+	proxyURLs := parseProxyURLs(config.ProxyURL)
+
+	// 为每个代理 URL 创建一个 http.Client
+	clients := make([]*http.Client, 0, len(proxyURLs))
+	for _, proxyURL := range proxyURLs {
+		client := m.createClient(config, proxyURL)
+		clients = append(clients, client)
+	}
+
+	pool = &ProxyClientPool{clients: clients}
+	m.pools[fingerprint] = pool
+	return pool
+}
+
+// createClient 根据配置和单个代理 URL 创建 HTTP 客户端。
+func (m *HTTPClientManager) createClient(config *Config, proxyURL string) *http.Client {
 	transport := &http.Transport{
 		DialContext: (&net.Dialer{
 			Timeout:   config.ConnectTimeout,
@@ -113,27 +160,56 @@ func (m *HTTPClientManager) GetClient(config *Config) *http.Client {
 		ReadBufferSize:        config.ReadBufferSize,
 	}
 
-	// 设置 HTTP 代理。
-	if config.ProxyURL != "" {
-		proxyURL, err := url.Parse(config.ProxyURL)
+	// 设置 HTTP 代理
+	if proxyURL != "" {
+		parsed, err := url.Parse(proxyURL)
 		if err != nil {
-			logrus.Warnf("Invalid proxy URL '%s' provided, falling back to environment settings: %v", config.ProxyURL, err)
+			logrus.Warnf("Invalid proxy URL '%s' provided, falling back to environment settings: %v", proxyURL, err)
 			transport.Proxy = http.ProxyFromEnvironment
 		} else {
-			transport.Proxy = http.ProxyURL(proxyURL)
+			transport.Proxy = http.ProxyURL(parsed)
 		}
 	} else {
 		transport.Proxy = http.ProxyFromEnvironment
 	}
 
-	newClient := &http.Client{
+	return &http.Client{
 		Transport:     transport,
 		Timeout:       config.RequestTimeout,
 		CheckRedirect: stripSensitiveOnCrossHostRedirect,
 	}
+}
 
-	m.clients[fingerprint] = newClient
-	return newClient
+// parseProxyURLs 将逗号分隔的代理 URL 字符串解析为地址列表。
+// 空字符串返回 [""], 表示不使用代理（回退到环境变量）。
+// 无效的地址会被跳过并记录警告。
+func parseProxyURLs(proxyURLField string) []string {
+	if proxyURLField == "" {
+		return []string{""}
+	}
+
+	parts := strings.Split(proxyURLField, ",")
+	var urls []string
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed == "" {
+			continue
+		}
+		// 验证 URL 格式
+		if _, err := url.Parse(trimmed); err != nil {
+			logrus.Warnf("Skipping invalid proxy URL '%s': %v", trimmed, err)
+			continue
+		}
+		urls = append(urls, trimmed)
+	}
+
+	// 如果所有地址都无效，回退到环境变量
+	if len(urls) == 0 {
+		logrus.Warn("All proxy URLs are invalid, falling back to environment settings")
+		return []string{""}
+	}
+
+	return urls
 }
 
 // sensitiveProxyHeaders are custom-named credential headers that proxy channels

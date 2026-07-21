@@ -374,6 +374,35 @@ func (s *GroupService) UpdateGroup(ctx context.Context, id uint, params GroupUpd
 		return nil, app_errors.ParseDBError(err)
 	}
 
+	// 在开启事务之前检查该分组是否被聚合分组用作子分组。
+	// SQLite 单连接模式下，事务会占用唯一连接，事务内再通过 s.db 查询会死锁。
+	if group.GroupType != "aggregate" && (params.ChannelType != nil || params.ValidationEndpoint != nil) {
+		count, err := s.aggregateGroupService.CountAggregateGroupsUsingSubGroup(ctx, group.ID)
+		if err != nil {
+			return nil, err
+		}
+
+		if count > 0 {
+			// 检查是否正在修改 ChannelType
+			if params.ChannelType != nil {
+				cleanedChannelType := strings.TrimSpace(*params.ChannelType)
+				if group.ChannelType != cleanedChannelType {
+					return nil, NewI18nError(app_errors.ErrValidation, "validation.sub_group_referenced_cannot_modify",
+						map[string]any{"count": count})
+				}
+			}
+
+			// 检查是否正在修改 ValidationEndpoint
+			if params.ValidationEndpoint != nil {
+				cleanedValidationEndpoint := strings.TrimSpace(*params.ValidationEndpoint)
+				if group.ValidationEndpoint != cleanedValidationEndpoint {
+					return nil, NewI18nError(app_errors.ErrValidation, "validation.sub_group_referenced_cannot_modify",
+						map[string]any{"count": count})
+				}
+			}
+		}
+	}
+
 	tx := s.db.WithContext(ctx).Begin()
 	if err := tx.Error; err != nil {
 		return nil, app_errors.ErrDatabase
@@ -402,34 +431,6 @@ func (s *GroupService) UpdateGroup(ctx context.Context, id uint, params GroupUpd
 			return nil, err
 		}
 		group.Upstreams = cleanedUpstreams
-	}
-
-	// 允许关键修改前，检查该分组是否被聚合分组用作子分组
-	if group.GroupType != "aggregate" && (params.ChannelType != nil || params.ValidationEndpoint != nil) {
-		count, err := s.aggregateGroupService.CountAggregateGroupsUsingSubGroup(ctx, group.ID)
-		if err != nil {
-			return nil, err
-		}
-
-		if count > 0 {
-			// 检查是否正在修改 ChannelType
-			if params.ChannelType != nil {
-				cleanedChannelType := strings.TrimSpace(*params.ChannelType)
-				if group.ChannelType != cleanedChannelType {
-					return nil, NewI18nError(app_errors.ErrValidation, "validation.sub_group_referenced_cannot_modify",
-						map[string]any{"count": count})
-				}
-			}
-
-			// 检查是否正在修改 ValidationEndpoint
-			if params.ValidationEndpoint != nil {
-				cleanedValidationEndpoint := strings.TrimSpace(*params.ValidationEndpoint)
-				if group.ValidationEndpoint != cleanedValidationEndpoint {
-					return nil, NewI18nError(app_errors.ErrValidation, "validation.sub_group_referenced_cannot_modify",
-						map[string]any{"count": count})
-				}
-			}
-		}
 	}
 
 	if params.ChannelType != nil && group.GroupType != "aggregate" {
@@ -545,18 +546,10 @@ func (s *GroupService) DeleteGroup(ctx context.Context, id uint) error {
 		keyIDs = append(keyIDs, key.ID)
 	}
 
-	tx := s.db.WithContext(ctx).Begin()
-	if err := tx.Error; err != nil {
-		return app_errors.ErrDatabase
-	}
-	defer func() {
-		if tx != nil {
-			tx.Rollback()
-		}
-	}()
-
+	// 在开启事务之前加载分组并检查是否被聚合分组引用。
+	// SQLite 单连接模式下，事务会占用唯一连接，事务内再通过 s.db 查询会死锁。
 	var group models.Group
-	if err := tx.First(&group, id).Error; err != nil {
+	if err := s.db.WithContext(ctx).First(&group, id).Error; err != nil {
 		return app_errors.ParseDBError(err)
 	}
 
@@ -571,6 +564,16 @@ func (s *GroupService) DeleteGroup(ctx context.Context, id uint) error {
 				map[string]any{"count": refCount})
 		}
 	}
+
+	tx := s.db.WithContext(ctx).Begin()
+	if err := tx.Error; err != nil {
+		return app_errors.ErrDatabase
+	}
+	defer func() {
+		if tx != nil {
+			tx.Rollback()
+		}
+	}()
 
 	if err := tx.Where("group_id = ? OR sub_group_id = ?", id, id).Delete(&models.GroupSubGroup{}).Error; err != nil {
 		return app_errors.ParseDBError(err)
@@ -621,6 +624,17 @@ func (s *GroupService) CopyGroup(ctx context.Context, sourceGroupID uint, copyKe
 		return nil, app_errors.ParseDBError(err)
 	}
 
+	// 聚合分组没有自己的密钥，且子分组关系不会随之复制，复制会产生无意义的空副本
+	if sourceGroup.GroupType == "aggregate" {
+		return nil, NewI18nError(app_errors.ErrValidation, "validation.aggregate_cannot_copy", nil)
+	}
+
+	// 在开启事务之前生成唯一分组名，避免 SQLite 单连接模式下事务内查询死锁
+	newGroupName, err := s.generateUniqueGroupName(ctx, sourceGroup.Name)
+	if err != nil {
+		return nil, err
+	}
+
 	tx := s.db.WithContext(ctx).Begin()
 	if err := tx.Error; err != nil {
 		return nil, app_errors.ErrDatabase
@@ -631,17 +645,8 @@ func (s *GroupService) CopyGroup(ctx context.Context, sourceGroupID uint, copyKe
 		}
 	}()
 
-	// 聚合分组没有自己的密钥，且子分组关系不会随之复制，复制会产生无意义的空副本
-	if sourceGroup.GroupType == "aggregate" {
-		return nil, NewI18nError(app_errors.ErrValidation, "validation.aggregate_cannot_copy", nil)
-	}
-
 	newGroup := sourceGroup
 	newGroup.ID = 0
-	newGroupName, err := s.generateUniqueGroupName(ctx, sourceGroup.Name)
-	if err != nil {
-		return nil, err
-	}
 	newGroup.Name = newGroupName
 	if sourceGroup.DisplayName != "" {
 		newGroup.DisplayName = sourceGroup.DisplayName + " Copy"

@@ -552,7 +552,7 @@ export default {
     enableRequestLogging: "启用请求日志",
     enableErrorLogging: "启用错误日志",
     enableDebugMode: "启用调试模式",
-    proxyUrl: "代理服务器地址",
+    proxyUrl: "代理服务器地址（多个用逗号分隔）",
     corsEnabled: "启用 CORS",
     allowedOrigins: "允许的源",
     allowedMethods: "允许的方法",

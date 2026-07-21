@@ -424,11 +424,11 @@ func (ps *ProxyServer) executeRequestWithRetry(
 				// 流式请求：不提前 cancel，让 context 随客户端连接生命周期自然结束
 				// 否则 HTTP/2 下会截断流
 				// 注意：c.Request.Context() 会在客户端断开时自动取消，不会泄露
-				responseBody = ps.handleStreamingResponse(c, resp)
+				responseBody = ps.handleStreamingResponse(c, resp, group, apiKey)
 				cancel() // 流结束后显式 cancel，消除 go vet 警告
 			} else {
 				defer cancel()
-				responseBody = ps.handleNormalResponse(c, resp)
+				responseBody = ps.handleNormalResponse(c, resp, group, apiKey)
 			}
 		}
 

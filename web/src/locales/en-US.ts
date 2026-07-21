@@ -575,7 +575,7 @@ export default {
     enableRequestLogging: "Enable Request Logging",
     enableErrorLogging: "Enable Error Logging",
     enableDebugMode: "Enable Debug Mode",
-    proxyUrl: "Proxy Server URL",
+    proxyUrl: "Proxy Server URL (comma-separated)",
     corsEnabled: "Enable CORS",
     allowedOrigins: "Allowed Origins",
     allowedMethods: "Allowed Methods",

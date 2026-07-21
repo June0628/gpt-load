@@ -172,7 +172,7 @@ var MessagesJaJP = map[string]string{
 	"config.max_idle_conns_per_host":      "ホストごとの最大アイドル接続数",
 	"config.max_idle_conns_per_host_desc": "HTTPクライアント接続プールで各上流ホストに許可される最大アイドル接続数。",
 	"config.proxy_url":                    "プロキシサーバーURL",
-	"config.proxy_url_desc":               "グローバルHTTP/HTTPSプロキシサーバーURL。例：http://user:pass@host:port。空の場合は環境変数設定を使用。",
+	"config.proxy_url_desc":               "グローバルHTTP/HTTPSプロキシサーバーURL。カンマ区切りで複数アドレスを指定するとラウンドロビン負荷分散されます。例：http://user:pass@host:port,socks5://host2:1080。空の場合は環境変数設定を使用。",
 
 	// Key config related
 	"config.max_retries":                      "最大リトライ数",

@@ -1,12 +1,16 @@
 package proxy
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/base64"
 	"io"
 	"net/http"
 	"os"
+	"strconv"
+	"strings"
 
+	"gpt-load/internal/models"
 	"gpt-load/internal/utils"
 
 	"github.com/gin-gonic/gin"
@@ -16,7 +20,8 @@ import (
 // handleStreamingResponse 转发流式响应，并返回捕获的完整响应体
 // 流式客户端禁用了自动解压，因此需要手动解压捕获的响应体后再存储
 // 使用磁盘临时文件缓冲流式数据，避免大响应体在高并发下导致 OOM
-func (ps *ProxyServer) handleStreamingResponse(c *gin.Context, resp *http.Response) string {
+// 同时过滤上游追加的配额 JSON 事件，避免客户端解析报错
+func (ps *ProxyServer) handleStreamingResponse(c *gin.Context, resp *http.Response, group *models.Group, apiKey *models.APIKey) string {
 	defer resp.Body.Close()
 
 	c.Header("Content-Type", "text/event-stream")
@@ -27,41 +32,76 @@ func (ps *ProxyServer) handleStreamingResponse(c *gin.Context, resp *http.Respon
 	flusher, ok := c.Writer.(http.Flusher)
 	if !ok {
 		logrus.Error("Streaming unsupported by the writer, falling back to normal response")
-		return ps.handleNormalResponse(c, resp)
+		return ps.handleNormalResponse(c, resp, group, apiKey)
 	}
 
 	// 使用磁盘临时文件缓冲流式响应，避免大响应体占用内存
 	tmpFile, err := os.CreateTemp("", "gpt-load-stream-*.bin")
 	if err != nil {
 		logrus.WithError(err).Warn("Failed to create temp file for streaming capture, falling back to in-memory buffer")
-		return ps.handleStreamingResponseInMemory(c, resp, flusher)
+		return ps.handleStreamingResponseInMemory(c, resp, flusher, group, apiKey)
 	}
 	defer os.Remove(tmpFile.Name())
 	defer tmpFile.Close()
 
-	buf := make([]byte, 4*1024)
+	// 使用 bufio.Reader 按行读取 SSE 事件，以便检测和过滤配额事件
+	reader := bufio.NewReaderSize(resp.Body, 64*1024)
+
+	// skipUntilBlank 为 true 时跳过所有行直到遇到空行（SSE 事件分隔符）
+	// 用于跳过以 event: 开头的自定义事件的所有字段
+	skipUntilBlank := false
+
 	for {
-		n, err := resp.Body.Read(buf)
-		if n > 0 {
-			// 先转发给客户端保证低延迟，再写入临时文件用于日志记录
-			if _, writeErr := c.Writer.Write(buf[:n]); writeErr != nil {
-				logUpstreamError("writing stream to client", writeErr)
-				// 客户端断开：将当前已读取但未写入的 chunk 补写入临时文件，确保日志完整
-				if _, fileErr := tmpFile.Write(buf[:n]); fileErr != nil {
-					logUpstreamError("writing remaining stream to temp file", fileErr)
+		line, readErr := reader.ReadString('\n')
+		hasLine := len(line) > 0
+
+		if hasLine {
+			if skipUntilBlank {
+				// 跳过模式中仍需检测配额信息（配额 data 行在 event 行之后）
+				if q, isQuota := extractQuotaFromLine(line); isQuota && q != nil {
+					notifyQuotaIfNeeded(ps.settingsManager, group, apiKey, q)
 				}
-				return ps.readAndProcessTempFile(tmpFile, resp.Header)
+				// 遇到空行（仅含 \n 或 \r\n）时退出跳过模式
+				if strings.TrimSpace(line) == "" {
+					skipUntilBlank = false
+				}
+				continue
 			}
-			flusher.Flush()
-			if _, fileErr := tmpFile.Write(buf[:n]); fileErr != nil {
-				logUpstreamError("writing stream to temp file", fileErr)
+
+			// 检查是否为自定义事件类型行（如 event: catpaw.meta）
+			// 这类事件通常携带配额信息，需要整事件跳过
+			if strings.HasPrefix(line, "event:") {
+				skipUntilBlank = true
+				continue
+			}
+
+			// 检查当前行是否为配额事件
+			if q, isQuota := extractQuotaFromLine(line); isQuota {
+				// 提取配额信息，发送通知
+				if q != nil {
+					notifyQuotaIfNeeded(ps.settingsManager, group, apiKey, q)
+				}
+				// 跳过转发原始配额行，上游通常会在之后发送标准的 data: [DONE]
+			} else {
+				// 正常行：转发给客户端并写入临时文件
+				if _, writeErr := c.Writer.Write([]byte(line)); writeErr != nil {
+					logUpstreamError("writing stream to client", writeErr)
+					// 客户端断开：将当前行补写入临时文件，确保日志完整
+					tmpFile.WriteString(line)
+					// 将剩余数据也写入临时文件
+					io.Copy(tmpFile, reader)
+					return ps.readAndProcessTempFile(tmpFile, resp.Header)
+				}
+				flusher.Flush()
+				tmpFile.WriteString(line)
 			}
 		}
-		if err == io.EOF {
+
+		if readErr == io.EOF {
 			break
 		}
-		if err != nil {
-			logUpstreamError("reading from upstream", err)
+		if readErr != nil {
+			logUpstreamError("reading from upstream", readErr)
 			break
 		}
 	}
@@ -71,30 +111,68 @@ func (ps *ProxyServer) handleStreamingResponse(c *gin.Context, resp *http.Respon
 
 // handleStreamingResponseInMemory 是 handleStreamingResponse 的内存降级版本
 // 当无法创建临时文件时使用，保留原有行为
-func (ps *ProxyServer) handleStreamingResponseInMemory(c *gin.Context, resp *http.Response, flusher http.Flusher) string {
+// 同样包含配额事件过滤逻辑
+func (ps *ProxyServer) handleStreamingResponseInMemory(c *gin.Context, resp *http.Response, flusher http.Flusher, group *models.Group, apiKey *models.APIKey) string {
 	var captured bytes.Buffer
-	buf := make([]byte, 4*1024)
+
+	// 使用 bufio.Reader 按行读取 SSE 事件
+	reader := bufio.NewReaderSize(resp.Body, 64*1024)
+
+	// skipUntilBlank 为 true 时跳过所有行直到遇到空行（SSE 事件分隔符）
+	skipUntilBlank := false
+
 	for {
-		n, err := resp.Body.Read(buf)
-		if n > 0 {
-			// 先转发给客户端保证低延迟，再写入捕获 buffer 用于日志记录
-			if _, writeErr := c.Writer.Write(buf[:n]); writeErr != nil {
-				logUpstreamError("writing stream to client", writeErr)
-				// 客户端断开：补写当前 chunk 到捕获 buffer，确保日志完整
-				captured.Write(buf[:n])
-				return ps.decompressAndEncode(captured.Bytes(), resp.Header)
+		line, readErr := reader.ReadString('\n')
+		hasLine := len(line) > 0
+
+		if hasLine {
+			if skipUntilBlank {
+				// 跳过模式中仍需检测配额信息（配额 data 行在 event 行之后）
+				if q, isQuota := extractQuotaFromLine(line); isQuota && q != nil {
+					notifyQuotaIfNeeded(ps.settingsManager, group, apiKey, q)
+				}
+				// 遇到空行（仅含 \n 或 \r\n）时退出跳过模式
+				if strings.TrimSpace(line) == "" {
+					skipUntilBlank = false
+				}
+				continue
 			}
-			flusher.Flush()
-			captured.Write(buf[:n])
+
+			// 检查是否为自定义事件类型行（如 event: catpaw.meta）
+			if strings.HasPrefix(line, "event:") {
+				skipUntilBlank = true
+				continue
+			}
+
+			// 检查当前行是否为配额事件
+			if q, isQuota := extractQuotaFromLine(line); isQuota {
+				if q != nil {
+					notifyQuotaIfNeeded(ps.settingsManager, group, apiKey, q)
+				}
+			} else {
+				// 正常行：转发给客户端并写入捕获 buffer
+				if _, writeErr := c.Writer.Write([]byte(line)); writeErr != nil {
+					logUpstreamError("writing stream to client", writeErr)
+					// 客户端断开：补写当前行到捕获 buffer
+					captured.WriteString(line)
+					// 将剩余数据也写入捕获 buffer
+					io.Copy(&captured, reader)
+					return ps.decompressAndEncode(captured.Bytes(), resp.Header)
+				}
+				flusher.Flush()
+				captured.WriteString(line)
+			}
 		}
-		if err == io.EOF {
+
+		if readErr == io.EOF {
 			break
 		}
-		if err != nil {
-			logUpstreamError("reading from upstream", err)
-			return ps.decompressAndEncode(captured.Bytes(), resp.Header)
+		if readErr != nil {
+			logUpstreamError("reading from upstream", readErr)
+			break
 		}
 	}
+
 	return ps.decompressAndEncode(captured.Bytes(), resp.Header)
 }
 
@@ -115,16 +193,34 @@ func (ps *ProxyServer) readAndProcessTempFile(tmpFile *os.File, headers http.Hea
 // handleNormalResponse 转发普通响应，自行关闭 resp.Body
 // 返回捕获的完整响应体
 // 普通客户端已启用自动解压，但为防止上游返回非标准响应，仍做防御性解压
-func (ps *ProxyServer) handleNormalResponse(c *gin.Context, resp *http.Response) string {
+// 同时过滤上游追加的配额 JSON，避免客户端解析报错
+func (ps *ProxyServer) handleNormalResponse(c *gin.Context, resp *http.Response, group *models.Group, apiKey *models.APIKey) string {
 	defer resp.Body.Close()
 
-	var captured bytes.Buffer
-	// 同时写入客户端和捕获 buffer
-	teeWriter := io.MultiWriter(c.Writer, &captured)
-	if _, err := io.Copy(teeWriter, resp.Body); err != nil {
-		logUpstreamError("copying response body", err)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		logUpstreamError("reading response body", err)
+		return ""
 	}
-	return ps.decompressAndEncode(captured.Bytes(), resp.Header)
+
+	// 过滤配额 JSON
+	filteredBody, quota := filterQuotaFromBody(body)
+	if quota != nil {
+		notifyQuotaIfNeeded(ps.settingsManager, group, apiKey, quota)
+		// 如果 body 被过滤修改，更新 Content-Length 头
+		if len(filteredBody) != len(body) {
+			c.Header("Content-Length", strconv.Itoa(len(filteredBody)))
+		}
+	}
+
+	// 转发过滤后的响应体给客户端
+	if len(filteredBody) > 0 {
+		if _, writeErr := c.Writer.Write(filteredBody); writeErr != nil {
+			logUpstreamError("writing response to client", writeErr)
+		}
+	}
+
+	return ps.decompressAndEncode(filteredBody, resp.Header)
 }
 
 // decompressAndEncode 解压响应体（如果需要），然后转为字符串

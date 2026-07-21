@@ -170,7 +170,7 @@ var MessagesEnUS = map[string]string{
 	"config.max_idle_conns_per_host":      "Max Idle Connections Per Host",
 	"config.max_idle_conns_per_host_desc": "Maximum number of idle connections allowed per upstream host in the HTTP client connection pool.",
 	"config.proxy_url":                    "Proxy Server URL",
-	"config.proxy_url_desc":               "Global HTTP/HTTPS proxy server URL, e.g., http://user:pass@host:port. If empty, uses environment variable configuration.",
+	"config.proxy_url_desc":               "Global HTTP/HTTPS proxy server URL. Multiple addresses can be separated by commas for round-robin load balancing, e.g., http://user:pass@host:port,socks5://host2:1080. If empty, uses environment variable configuration.",
 
 	// Key config related
 	"config.max_retries":                      "Max Retries",

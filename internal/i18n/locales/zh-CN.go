@@ -178,7 +178,7 @@ var MessagesZhCN = map[string]string{
 	"config.max_idle_conns_per_host":      "每主机最大空闲连接数",
 	"config.max_idle_conns_per_host_desc": "HTTP 客户端连接池对每个上游主机允许的最大空闲连接数。",
 	"config.proxy_url":                    "代理服务器地址",
-	"config.proxy_url_desc":               "全局 HTTP/HTTPS 代理服务器地址，例如：http://user:pass@host:port。如果为空，则使用环境变量配置。",
+	"config.proxy_url_desc":               "全局 HTTP/HTTPS 代理服务器地址，支持多个地址用英文逗号分隔实现轮询负载均衡，例如：http://user:pass@host:port,socks5://host2:1080。如果为空，则使用环境变量配置。",
 
 	// Key config related
 	"config.max_retries":                      "最大重试次数",
