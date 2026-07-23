@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"gpt-load/internal/httpclient"
 	"gpt-load/internal/models"
 	"gpt-load/internal/types"
 	"gpt-load/internal/utils"
@@ -28,8 +29,8 @@ type UpstreamInfo struct {
 type BaseChannel struct {
 	Name               string
 	Upstreams          []UpstreamInfo
-	HTTPClient         *http.Client
-	StreamClient       *http.Client
+	HTTPClient         *httpclient.ProxyClientPool
+	StreamClient       *httpclient.ProxyClientPool
 	TestModel          string
 	ValidationEndpoint string
 	upstreamLock       sync.Mutex
@@ -121,14 +122,14 @@ func (b *BaseChannel) IsConfigStale(group *models.Group) bool {
 	return false
 }
 
-// GetHTTPClient 返回标准请求的客户端
+// GetHTTPClient 返回标准请求的客户端（从代理池中轮询选择）
 func (b *BaseChannel) GetHTTPClient() *http.Client {
-	return b.HTTPClient
+	return b.HTTPClient.GetClient()
 }
 
-// GetStreamClient 返回流式请求的客户端
+// GetStreamClient 返回流式请求的客户端（从代理池中轮询选择）
 func (b *BaseChannel) GetStreamClient() *http.Client {
-	return b.StreamClient
+	return b.StreamClient.GetClient()
 }
 
 // ApplyModelRedirect 根据分组的重定向规则应用模型重定向

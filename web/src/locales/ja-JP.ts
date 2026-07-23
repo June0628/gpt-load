@@ -571,7 +571,7 @@ export default {
     enableRequestLogging: "リクエストログ有効化",
     enableErrorLogging: "エラーログ有効化",
     enableDebugMode: "デバッグモード有効化",
-    proxyUrl: "プロキシサーバーURL",
+    proxyUrl: "プロキシサーバーURL（カンマ区切り）",
     corsEnabled: "CORS有効化",
     allowedOrigins: "許可されたオリジン",
     allowedMethods: "許可されたメソッド",
