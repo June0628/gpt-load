@@ -121,6 +121,24 @@ func (sm *SystemSettingsManager) Stop(ctx context.Context) {
 	}
 }
 
+// sensitiveSettingKeys 记录不应以明文写入日志的系统设置
+var sensitiveSettingKeys = map[string]struct{}{
+	"proxy_keys":                    {},
+	"feishu_webhook_url":            {},
+	"log_upload_tencent_secret_id":  {},
+	"log_upload_tencent_secret_key": {},
+	"log_upload_webdav_username":    {},
+	"log_upload_webdav_password":    {},
+}
+
+// maskSettingValue 对敏感系统设置的值做脱敏
+func maskSettingValue(key, value string) string {
+	if _, sensitive := sensitiveSettingKeys[key]; !sensitive || value == "" {
+		return value
+	}
+	return utils.MaskAPIKey(value)
+}
+
 // EnsureSettingsInitialized 确保数据库中存在所有系统设置的记录
 func (sm *SystemSettingsManager) EnsureSettingsInitialized(authConfig types.AuthConfig) error {
 	defaultSettings := utils.DefaultSystemSettings()
@@ -156,7 +174,7 @@ func (sm *SystemSettingsManager) EnsureSettingsInitialized(authConfig types.Auth
 				logrus.Errorf("Failed to initialize setting %s: %v", setting.SettingKey, err)
 				return err
 			}
-			logrus.Infof("Initialized system setting: %s = %s", setting.SettingKey, setting.SettingValue)
+			logrus.Infof("Initialized system setting: %s = %s", setting.SettingKey, maskSettingValue(setting.SettingKey, setting.SettingValue))
 		}
 	}
 

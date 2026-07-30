@@ -99,7 +99,7 @@ func registerAPIRoutes(
 
 // registerPublicAPIRoutes 公开API路由
 func registerPublicAPIRoutes(api *gin.RouterGroup, serverHandler *handler.Server) {
-	api.POST("/auth/login", serverHandler.Login)
+	api.POST("/auth/login", middleware.LoginRateLimiter(), serverHandler.Login)
 	api.GET("/integration/info", serverHandler.GetIntegrationInfo)
 }
 

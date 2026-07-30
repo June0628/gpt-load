@@ -4,6 +4,7 @@ package middleware
 import (
 	"crypto/subtle"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -34,10 +35,10 @@ func Logger(config types.LogConfig) gin.HandlerFunc {
 		method := c.Request.Method
 		statusCode := c.Writer.Status()
 
-		// 构建完整路径（避免字符串拼接）
+		// 构建完整路径（避免字符串拼接），并脱敏查询参数中的密钥
 		fullPath := path
 		if raw != "" {
-			fullPath = path + "?" + raw
+			fullPath = path + "?" + redactSensitiveQuery(raw)
 		}
 
 		// 获取密钥信息（如果存在）
@@ -258,6 +259,40 @@ func isMonitoringEndpoint(path string) bool {
 		}
 	}
 	return false
+}
+
+// sensitiveQueryParams 记录不应写入日志的查询参数名
+var sensitiveQueryParams = map[string]struct{}{
+	"key":          {},
+	"auth_key":     {},
+	"api_key":      {},
+	"access_token": {},
+	"token":        {},
+	"password":     {},
+}
+
+// redactSensitiveQuery 脱敏查询串中的密钥，避免认证密钥写入访问日志
+func redactSensitiveQuery(raw string) string {
+	values, err := url.ParseQuery(raw)
+	if err != nil {
+		return "[redacted]"
+	}
+
+	redacted := false
+	for name, vals := range values {
+		if _, sensitive := sensitiveQueryParams[strings.ToLower(name)]; !sensitive {
+			continue
+		}
+		for i := range vals {
+			vals[i] = "[redacted]"
+		}
+		redacted = true
+	}
+
+	if !redacted {
+		return raw
+	}
+	return values.Encode()
 }
 
 // extractAuthKey 提取认证密钥

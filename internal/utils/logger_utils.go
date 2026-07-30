@@ -36,10 +36,10 @@ func SetupLogger(configManager types.ConfigManager) {
 	// Setup file logging if enabled
 	if logConfig.EnableFile {
 		logDir := filepath.Dir(logConfig.FilePath)
-		if err := os.MkdirAll(logDir, 0755); err != nil {
+		if err := os.MkdirAll(logDir, 0750); err != nil {
 			logrus.Warnf("Failed to create log directory: %v", err)
 		} else {
-			logFile, err := os.OpenFile(logConfig.FilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+			logFile, err := os.OpenFile(logConfig.FilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 			if err != nil {
 				logrus.Warnf("Failed to open log file: %v", err)
 			} else {
