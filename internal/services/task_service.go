@@ -217,6 +217,8 @@ func (s *TaskService) EndTask(resultData any, taskErr error) error {
 
 // ForceClearTask 强制清除所有任务相关的键。
 func (s *TaskService) ForceClearTask() error {
-	_ = s.store.Delete(globalTaskKey)
-	return s.store.Delete(globalTaskResultKey)
+	return errors.Join(
+		s.store.Delete(globalTaskKey),
+		s.store.Delete(globalTaskResultKey),
+	)
 }

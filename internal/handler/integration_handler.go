@@ -61,6 +61,7 @@ func (s *Server) GetIntegrationInfo(c *gin.Context) {
 		// 获取所有分组
 		groups, err := s.GroupService.ListGroups(c.Request.Context())
 		if err != nil {
+			logrus.WithContext(c.Request.Context()).WithError(err).Error("Failed to list groups for integration info")
 			response.Error(c, app_errors.NewAPIError(app_errors.ErrInternalServer, "Internal server error"))
 			return
 		}

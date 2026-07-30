@@ -123,7 +123,9 @@ func (a *App) Start() error {
 		}
 		logrus.Info("System settings initialized in DB.")
 
-		a.settingsManager.Initialize(a.storage, a.groupManager, a.configManager.IsMaster())
+		if err := a.settingsManager.Initialize(a.storage, a.groupManager, a.configManager.IsMaster()); err != nil {
+			return fmt.Errorf("failed to initialize settings manager: %w", err)
+		}
 
 		// 从数据库加载密钥到 Redis
 		if err := a.keyPoolProvider.LoadKeysFromDB(); err != nil {
@@ -145,13 +147,17 @@ func (a *App) Start() error {
 		a.cronChecker.Start()
 	} else {
 		logrus.Info("Starting as Slave Node.")
-		a.settingsManager.Initialize(a.storage, a.groupManager, a.configManager.IsMaster())
+		if err := a.settingsManager.Initialize(a.storage, a.groupManager, a.configManager.IsMaster()); err != nil {
+			return fmt.Errorf("failed to initialize settings manager: %w", err)
+		}
 	}
 
 	// 显示配置并启动所有后台服务
 	a.configManager.DisplayServerConfig()
 
-	a.groupManager.Initialize()
+	if err := a.groupManager.Initialize(); err != nil {
+		return fmt.Errorf("failed to initialize group manager: %w", err)
+	}
 
 	// 创建 HTTP 服务器
 	serverConfig := a.configManager.GetEffectiveServerConfig()
@@ -238,7 +244,9 @@ func (a *App) Stop(ctx context.Context) {
 	}
 
 	if a.storage != nil {
-		a.storage.Close()
+		if err := a.storage.Close(); err != nil {
+			logrus.WithError(err).Error("Failed to close storage cleanly")
+		}
 	}
 
 	logrus.Info("Server exited gracefully")
