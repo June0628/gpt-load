@@ -65,6 +65,15 @@ func validateKeysText(c *gin.Context, keysText string) bool {
 	return true
 }
 
+// respondKeyBatchError 将批量密钥操作的服务层错误映射为标准错误响应。
+func respondKeyBatchError(c *gin.Context, err error) {
+	if strings.Contains(err.Error(), "batch size exceeds the limit") || err.Error() == "no valid keys found in the input text" {
+		response.Error(c, app_errors.NewAPIError(app_errors.ErrValidation, err.Error()))
+		return
+	}
+	response.Error(c, app_errors.ParseDBError(err))
+}
+
 // findGroupByID 根据 ID 查找分组的辅助函数。
 func (s *Server) findGroupByID(c *gin.Context, groupID uint) (*models.Group, bool) {
 	var group models.Group
@@ -99,8 +108,7 @@ type ValidateGroupKeysRequest struct {
 // AddMultipleKeys 处理从文本块在指定分组中批量创建密钥。
 func (s *Server) AddMultipleKeys(c *gin.Context) {
 	var req KeyTextRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, app_errors.NewAPIError(app_errors.ErrInvalidJSON, err.Error()))
+	if !bindJSON(c, &req) {
 		return
 	}
 
@@ -114,13 +122,7 @@ func (s *Server) AddMultipleKeys(c *gin.Context) {
 
 	result, err := s.KeyService.AddMultipleKeys(req.GroupID, req.KeysText)
 	if err != nil {
-		if strings.Contains(err.Error(), "batch size exceeds the limit") {
-			response.Error(c, app_errors.NewAPIError(app_errors.ErrValidation, err.Error()))
-		} else if err.Error() == "no valid keys found in the input text" {
-			response.Error(c, app_errors.NewAPIError(app_errors.ErrValidation, err.Error()))
-		} else {
-			response.Error(c, app_errors.ParseDBError(err))
-		}
+		respondKeyBatchError(c, err)
 		return
 	}
 
@@ -182,8 +184,7 @@ func (s *Server) AddMultipleKeysAsync(c *gin.Context) {
 	} else {
 		// 处理 JSON 请求（原始行为）
 		var req KeyTextRequest
-		if err := c.ShouldBindJSON(&req); err != nil {
-			response.Error(c, app_errors.NewAPIError(app_errors.ErrInvalidJSON, err.Error()))
+		if !bindJSON(c, &req) {
 			return
 		}
 		groupID = req.GroupID
@@ -258,8 +259,7 @@ func (s *Server) ListKeysInGroup(c *gin.Context) {
 // DeleteMultipleKeys 处理从文本块在指定分组中批量删除密钥。
 func (s *Server) DeleteMultipleKeys(c *gin.Context) {
 	var req KeyTextRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, app_errors.NewAPIError(app_errors.ErrInvalidJSON, err.Error()))
+	if !bindJSON(c, &req) {
 		return
 	}
 
@@ -273,13 +273,7 @@ func (s *Server) DeleteMultipleKeys(c *gin.Context) {
 
 	result, err := s.KeyService.DeleteMultipleKeys(req.GroupID, req.KeysText)
 	if err != nil {
-		if strings.Contains(err.Error(), "batch size exceeds the limit") {
-			response.Error(c, app_errors.NewAPIError(app_errors.ErrValidation, err.Error()))
-		} else if err.Error() == "no valid keys found in the input text" {
-			response.Error(c, app_errors.NewAPIError(app_errors.ErrValidation, err.Error()))
-		} else {
-			response.Error(c, app_errors.ParseDBError(err))
-		}
+		respondKeyBatchError(c, err)
 		return
 	}
 
@@ -289,8 +283,7 @@ func (s *Server) DeleteMultipleKeys(c *gin.Context) {
 // DeleteMultipleKeysAsync 处理通过异步任务从文本块在指定分组中批量删除密钥。
 func (s *Server) DeleteMultipleKeysAsync(c *gin.Context) {
 	var req KeyTextRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, app_errors.NewAPIError(app_errors.ErrInvalidJSON, err.Error()))
+	if !bindJSON(c, &req) {
 		return
 	}
 
@@ -315,8 +308,7 @@ func (s *Server) DeleteMultipleKeysAsync(c *gin.Context) {
 // RestoreMultipleKeys 处理从文本块在指定分组中批量恢复密钥。
 func (s *Server) RestoreMultipleKeys(c *gin.Context) {
 	var req KeyTextRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, app_errors.NewAPIError(app_errors.ErrInvalidJSON, err.Error()))
+	if !bindJSON(c, &req) {
 		return
 	}
 
@@ -330,13 +322,7 @@ func (s *Server) RestoreMultipleKeys(c *gin.Context) {
 
 	result, err := s.KeyService.RestoreMultipleKeys(req.GroupID, req.KeysText)
 	if err != nil {
-		if strings.Contains(err.Error(), "batch size exceeds the limit") {
-			response.Error(c, app_errors.NewAPIError(app_errors.ErrValidation, err.Error()))
-		} else if err.Error() == "no valid keys found in the input text" {
-			response.Error(c, app_errors.NewAPIError(app_errors.ErrValidation, err.Error()))
-		} else {
-			response.Error(c, app_errors.ParseDBError(err))
-		}
+		respondKeyBatchError(c, err)
 		return
 	}
 
@@ -346,8 +332,7 @@ func (s *Server) RestoreMultipleKeys(c *gin.Context) {
 // TestMultipleKeys 处理多密钥的一次性验证测试。
 func (s *Server) TestMultipleKeys(c *gin.Context) {
 	var req KeyTextRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, app_errors.NewAPIError(app_errors.ErrInvalidJSON, err.Error()))
+	if !bindJSON(c, &req) {
 		return
 	}
 
@@ -370,13 +355,7 @@ func (s *Server) TestMultipleKeys(c *gin.Context) {
 	results, err := s.KeyService.TestMultipleKeys(group, req.KeysText)
 	duration := time.Since(start).Milliseconds()
 	if err != nil {
-		if strings.Contains(err.Error(), "batch size exceeds the limit") {
-			response.Error(c, app_errors.NewAPIError(app_errors.ErrValidation, err.Error()))
-		} else if err.Error() == "no valid keys found in the input text" {
-			response.Error(c, app_errors.NewAPIError(app_errors.ErrValidation, err.Error()))
-		} else {
-			response.Error(c, app_errors.ParseDBError(err))
-		}
+		respondKeyBatchError(c, err)
 		return
 	}
 
@@ -389,8 +368,7 @@ func (s *Server) TestMultipleKeys(c *gin.Context) {
 // ValidateGroupKeys 发起对分组中所有密钥的手动验证任务。
 func (s *Server) ValidateGroupKeys(c *gin.Context) {
 	var req ValidateGroupKeysRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, app_errors.NewAPIError(app_errors.ErrInvalidJSON, err.Error()))
+	if !bindJSON(c, &req) {
 		return
 	}
 
@@ -423,8 +401,7 @@ func (s *Server) ValidateGroupKeys(c *gin.Context) {
 // RestoreAllInvalidKeys 将分组中所有"失效"密钥的状态恢复为"有效"。
 func (s *Server) RestoreAllInvalidKeys(c *gin.Context) {
 	var req GroupIDRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, app_errors.NewAPIError(app_errors.ErrInvalidJSON, err.Error()))
+	if !bindJSON(c, &req) {
 		return
 	}
 
@@ -444,8 +421,7 @@ func (s *Server) RestoreAllInvalidKeys(c *gin.Context) {
 // ClearAllInvalidKeys 删除分组中所有"失效"密钥。
 func (s *Server) ClearAllInvalidKeys(c *gin.Context) {
 	var req GroupIDRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, app_errors.NewAPIError(app_errors.ErrInvalidJSON, err.Error()))
+	if !bindJSON(c, &req) {
 		return
 	}
 
@@ -465,8 +441,7 @@ func (s *Server) ClearAllInvalidKeys(c *gin.Context) {
 // ClearAllKeys 删除分组中的所有密钥。
 func (s *Server) ClearAllKeys(c *gin.Context) {
 	var req GroupIDRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, app_errors.NewAPIError(app_errors.ErrInvalidJSON, err.Error()))
+	if !bindJSON(c, &req) {
 		return
 	}
 
@@ -523,16 +498,14 @@ type UpdateKeyNotesRequest struct {
 
 // UpdateKeyNotes 处理更新指定 API 密钥的备注。
 func (s *Server) UpdateKeyNotes(c *gin.Context) {
-	keyIDStr := c.Param("id")
-	keyID, err := strconv.Atoi(keyIDStr)
-	if err != nil || keyID <= 0 {
+	keyID, ok := parseUintParam(c, "id")
+	if !ok {
 		response.Error(c, app_errors.NewAPIError(app_errors.ErrBadRequest, "invalid key ID format"))
 		return
 	}
 
 	var req UpdateKeyNotesRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, app_errors.NewAPIError(app_errors.ErrInvalidJSON, err.Error()))
+	if !bindJSON(c, &req) {
 		return
 	}
 

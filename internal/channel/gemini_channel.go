@@ -1,14 +1,10 @@
 package channel
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	app_errors "gpt-load/internal/errors"
 	"gpt-load/internal/models"
-	"gpt-load/internal/utils"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -49,28 +45,12 @@ func (ch *GeminiChannel) ModifyRequest(req *http.Request, apiKey *models.APIKey,
 
 // IsStreamRequest 检查请求是否为流式响应
 func (ch *GeminiChannel) IsStreamRequest(c *gin.Context, bodyBytes []byte) bool {
-	path := c.Request.URL.Path
-	if strings.HasSuffix(path, ":streamGenerateContent") {
+	if strings.HasSuffix(c.Request.URL.Path, ":streamGenerateContent") {
 		return true
 	}
 
 	// 同时检查标准流式标识作为备选
-	if strings.Contains(c.GetHeader("Accept"), "text/event-stream") {
-		return true
-	}
-	if c.Query("stream") == "true" {
-		return true
-	}
-
-	type streamPayload struct {
-		Stream bool `json:"stream"`
-	}
-	var p streamPayload
-	if err := json.Unmarshal(bodyBytes, &p); err == nil {
-		return p.Stream
-	}
-
-	return false
+	return ch.BaseChannel.IsStreamRequest(c, bodyBytes)
 }
 
 func (ch *GeminiChannel) ExtractModel(c *gin.Context, bodyBytes []byte) string {
@@ -85,15 +65,7 @@ func (ch *GeminiChannel) ExtractModel(c *gin.Context, bodyBytes []byte) string {
 	}
 
 	// openai格式
-	type modelPayload struct {
-		Model string `json:"model"`
-	}
-	var p modelPayload
-	if err := json.Unmarshal(bodyBytes, &p); err == nil && p.Model != "" {
-		return p.Model
-	}
-
-	return ""
+	return ch.BaseChannel.ExtractModel(c, bodyBytes)
 }
 
 // ValidateKey 通过发送generateContent请求检查给定API密钥是否有效
@@ -128,44 +100,12 @@ func (ch *GeminiChannel) ValidateKey(ctx context.Context, apiKey *models.APIKey,
 			},
 		},
 	}
-	body, err := json.Marshal(payload)
+	req, err := ch.newValidationRequest(ctx, reqURL, payload, apiKey, group)
 	if err != nil {
-		return false, fmt.Errorf("failed to marshal validation payload: %w", err)
+		return false, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", reqURL, bytes.NewBuffer(body))
-	if err != nil {
-		return false, fmt.Errorf("failed to create validation request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	// 应用自定义header规则（如果有）
-	if len(group.HeaderRuleList) > 0 {
-		headerCtx := utils.NewHeaderVariableContext(group, apiKey)
-		utils.ApplyHeaderRules(req, group.HeaderRuleList, headerCtx)
-	}
-
-	resp, err := ch.GetHTTPClient().Do(req)
-	if err != nil {
-		return false, fmt.Errorf("failed to send validation request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	// 任何2xx状态码表示密钥有效
-	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		return true, nil
-	}
-
-	// 对于非200响应，解析响应体以提供更具体的错误原因
-	errorBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return false, fmt.Errorf("key is invalid (status %d), but failed to read error body: %w", resp.StatusCode, err)
-	}
-
-	// 使用新解析器提取干净的错误信息
-	parsedError := app_errors.ParseUpstreamError(errorBody)
-
-	return false, fmt.Errorf("[status %d] %s", resp.StatusCode, parsedError)
+	return ch.doValidationRequest(req)
 }
 
 // ApplyModelRedirect 覆盖Gemini通道的默认实现

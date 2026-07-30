@@ -233,16 +233,7 @@ func (s *MemoryStore) isExpiredByExpiry(key string) bool {
 // isExpiredByExpiryLocked 检查通过 Expire 设置了 TTL 的 key 是否已过期
 // 调用者必须已持有 s.mu（读或写锁），此函数内部自行获取 muExpiries 读锁
 func (s *MemoryStore) isExpiredByExpiryLocked(key string) bool {
-	s.muExpiries.RLock()
-	expiresAt, ok := s.expiries[key]
-	s.muExpiries.RUnlock()
-	if !ok {
-		return false
-	}
-	if expiresAt > 0 && time.Now().UnixNano() > expiresAt {
-		return true
-	}
-	return false
+	return s.isExpiredByExpiry(key)
 }
 
 // --- HASH 操作 ---

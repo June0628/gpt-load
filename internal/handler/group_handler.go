@@ -68,8 +68,7 @@ type GroupCreateRequest struct {
 // CreateGroup 处理创建新分组。
 func (s *Server) CreateGroup(c *gin.Context) {
 	var req GroupCreateRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, app_errors.NewAPIError(app_errors.ErrInvalidJSON, err.Error()))
+	if !bindJSON(c, &req) {
 		return
 	}
 
@@ -184,15 +183,13 @@ func validateGroupReorderItems(items []GroupReorderItemRequest) error {
 
 // UpdateGroup 处理更新已有分组。
 func (s *Server) UpdateGroup(c *gin.Context) {
-	id, err := strconv.Atoi(c.Param("id"))
-	if err != nil {
-		response.ErrorI18nFromAPIError(c, app_errors.ErrBadRequest, "validation.invalid_group_id")
+	id, ok := parseGroupIDParam(c)
+	if !ok {
 		return
 	}
 
 	var req GroupUpdateRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, app_errors.NewAPIError(app_errors.ErrInvalidJSON, err.Error()))
+	if !bindJSON(c, &req) {
 		return
 	}
 
@@ -237,7 +234,7 @@ func (s *Server) UpdateGroup(c *gin.Context) {
 	params.KeyNeverExpires = req.KeyNeverExpires
 	params.DailyRequestLimit = req.DailyRequestLimit
 
-	group, err := s.GroupService.UpdateGroup(c.Request.Context(), uint(id), params)
+	group, err := s.GroupService.UpdateGroup(c.Request.Context(), id, params)
 	if s.handleGroupError(c, err) {
 		return
 	}
@@ -248,8 +245,7 @@ func (s *Server) UpdateGroup(c *gin.Context) {
 // ReorderGroups 处理分组的批量排序更新。
 func (s *Server) ReorderGroups(c *gin.Context) {
 	var req GroupReorderRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, app_errors.NewAPIError(app_errors.ErrInvalidJSON, err.Error()))
+	if !bindJSON(c, &req) {
 		return
 	}
 
@@ -455,13 +451,12 @@ func (s *Server) newGroupResponse(ctx *gin.Context, group *models.Group) *GroupR
 
 // DeleteGroup 处理删除分组。
 func (s *Server) DeleteGroup(c *gin.Context) {
-	id, err := strconv.Atoi(c.Param("id"))
-	if err != nil {
-		response.ErrorI18nFromAPIError(c, app_errors.ErrBadRequest, "validation.invalid_group_id")
+	id, ok := parseGroupIDParam(c)
+	if !ok {
 		return
 	}
 
-	if s.handleGroupError(c, s.GroupService.DeleteGroup(c.Request.Context(), uint(id))) {
+	if s.handleGroupError(c, s.GroupService.DeleteGroup(c.Request.Context(), id)) {
 		return
 	}
 	response.SuccessI18n(c, "success.group_deleted", nil)
@@ -546,13 +541,12 @@ func (s *Server) inferCurrencyFromGroup(group *models.Group) string {
 }
 
 func (s *Server) GetGroupStats(c *gin.Context) {
-	id, err := strconv.Atoi(c.Param("id"))
-	if err != nil {
-		response.ErrorI18nFromAPIError(c, app_errors.ErrBadRequest, "validation.invalid_group_id")
+	id, ok := parseGroupIDParam(c)
+	if !ok {
 		return
 	}
 
-	stats, err := s.GroupService.GetGroupStats(c.Request.Context(), uint(id))
+	stats, err := s.GroupService.GetGroupStats(c.Request.Context(), id)
 	if s.handleGroupError(c, err) {
 		return
 	}
@@ -573,19 +567,17 @@ type GroupCopyResponse struct {
 // CopyGroup 处理复制分组及可选内容。
 
 func (s *Server) CopyGroup(c *gin.Context) {
-	id, err := strconv.Atoi(c.Param("id"))
-	if err != nil {
-		response.ErrorI18nFromAPIError(c, app_errors.ErrBadRequest, "validation.invalid_group_id")
+	id, ok := parseGroupIDParam(c)
+	if !ok {
 		return
 	}
 
 	var req GroupCopyRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, app_errors.NewAPIError(app_errors.ErrInvalidJSON, err.Error()))
+	if !bindJSON(c, &req) {
 		return
 	}
 
-	newGroup, err := s.GroupService.CopyGroup(c.Request.Context(), uint(id), req.CopyKeys)
+	newGroup, err := s.GroupService.CopyGroup(c.Request.Context(), id, req.CopyKeys)
 	if s.handleGroupError(c, err) {
 		return
 	}
@@ -620,13 +612,12 @@ type UpdateSubGroupWeightRequest struct {
 
 // GetSubGroups 处理获取聚合分组的子分组
 func (s *Server) GetSubGroups(c *gin.Context) {
-	id, err := strconv.Atoi(c.Param("id"))
-	if err != nil {
-		response.ErrorI18nFromAPIError(c, app_errors.ErrBadRequest, "validation.invalid_group_id")
+	id, ok := parseGroupIDParam(c)
+	if !ok {
 		return
 	}
 
-	subGroups, err := s.AggregateGroupService.GetSubGroups(c.Request.Context(), uint(id))
+	subGroups, err := s.AggregateGroupService.GetSubGroups(c.Request.Context(), id)
 	if s.handleGroupError(c, err) {
 		return
 	}
@@ -636,19 +627,17 @@ func (s *Server) GetSubGroups(c *gin.Context) {
 
 // AddSubGroups 处理向聚合分组添加子分组
 func (s *Server) AddSubGroups(c *gin.Context) {
-	id, err := strconv.Atoi(c.Param("id"))
-	if err != nil {
-		response.ErrorI18nFromAPIError(c, app_errors.ErrBadRequest, "validation.invalid_group_id")
+	id, ok := parseGroupIDParam(c)
+	if !ok {
 		return
 	}
 
 	var req AddSubGroupsRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, app_errors.NewAPIError(app_errors.ErrInvalidJSON, err.Error()))
+	if !bindJSON(c, &req) {
 		return
 	}
 
-	if err := s.AggregateGroupService.AddSubGroups(c.Request.Context(), uint(id), req.SubGroups); s.handleGroupError(c, err) {
+	if err := s.AggregateGroupService.AddSubGroups(c.Request.Context(), id, req.SubGroups); s.handleGroupError(c, err) {
 		return
 	}
 
@@ -657,25 +646,22 @@ func (s *Server) AddSubGroups(c *gin.Context) {
 
 // UpdateSubGroupWeight 处理更新子分组的权重
 func (s *Server) UpdateSubGroupWeight(c *gin.Context) {
-	id, err := strconv.Atoi(c.Param("id"))
-	if err != nil {
-		response.ErrorI18nFromAPIError(c, app_errors.ErrBadRequest, "validation.invalid_group_id")
+	id, ok := parseGroupIDParam(c)
+	if !ok {
 		return
 	}
 
-	subGroupID, err := strconv.Atoi(c.Param("subGroupId"))
-	if err != nil {
-		response.ErrorI18nFromAPIError(c, app_errors.ErrBadRequest, "validation.invalid_sub_group_id")
+	subGroupID, ok := parseSubGroupIDParam(c)
+	if !ok {
 		return
 	}
 
 	var req UpdateSubGroupWeightRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, app_errors.NewAPIError(app_errors.ErrInvalidJSON, err.Error()))
+	if !bindJSON(c, &req) {
 		return
 	}
 
-	if err := s.AggregateGroupService.UpdateSubGroupWeight(c.Request.Context(), uint(id), uint(subGroupID), req.Weight); s.handleGroupError(c, err) {
+	if err := s.AggregateGroupService.UpdateSubGroupWeight(c.Request.Context(), id, subGroupID, req.Weight); s.handleGroupError(c, err) {
 		return
 	}
 
@@ -684,19 +670,17 @@ func (s *Server) UpdateSubGroupWeight(c *gin.Context) {
 
 // DeleteSubGroup 处理从聚合分组中删除子分组
 func (s *Server) DeleteSubGroup(c *gin.Context) {
-	id, err := strconv.Atoi(c.Param("id"))
-	if err != nil {
-		response.ErrorI18nFromAPIError(c, app_errors.ErrBadRequest, "validation.invalid_group_id")
+	id, ok := parseGroupIDParam(c)
+	if !ok {
 		return
 	}
 
-	subGroupID, err := strconv.Atoi(c.Param("subGroupId"))
-	if err != nil {
-		response.ErrorI18nFromAPIError(c, app_errors.ErrBadRequest, "validation.invalid_sub_group_id")
+	subGroupID, ok := parseSubGroupIDParam(c)
+	if !ok {
 		return
 	}
 
-	if err := s.AggregateGroupService.DeleteSubGroup(c.Request.Context(), uint(id), uint(subGroupID)); s.handleGroupError(c, err) {
+	if err := s.AggregateGroupService.DeleteSubGroup(c.Request.Context(), id, subGroupID); s.handleGroupError(c, err) {
 		return
 	}
 
@@ -705,13 +689,12 @@ func (s *Server) DeleteSubGroup(c *gin.Context) {
 
 // GetParentAggregateGroups 处理获取引用指定分组的父聚合分组
 func (s *Server) GetParentAggregateGroups(c *gin.Context) {
-	id, err := strconv.Atoi(c.Param("id"))
-	if err != nil {
-		response.ErrorI18nFromAPIError(c, app_errors.ErrBadRequest, "validation.invalid_group_id")
+	id, ok := parseGroupIDParam(c)
+	if !ok {
 		return
 	}
 
-	parentGroups, err := s.AggregateGroupService.GetParentAggregateGroups(c.Request.Context(), uint(id))
+	parentGroups, err := s.AggregateGroupService.GetParentAggregateGroups(c.Request.Context(), id)
 	if s.handleGroupError(c, err) {
 		return
 	}

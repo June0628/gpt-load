@@ -60,8 +60,7 @@ func (s *Server) GetSettings(c *gin.Context) {
 // UpdateSettings 处理 PUT /api/settings 请求。
 func (s *Server) UpdateSettings(c *gin.Context) {
 	var settingsMap map[string]any
-	if err := c.ShouldBindJSON(&settingsMap); err != nil {
-		response.Error(c, app_errors.NewAPIError(app_errors.ErrInvalidJSON, err.Error()))
+	if !bindJSON(c, &settingsMap) {
 		return
 	}
 

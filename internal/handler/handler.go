@@ -4,7 +4,6 @@ package handler
 import (
 	"crypto/subtle"
 	"net/http"
-	"strconv"
 	"time"
 
 	"gpt-load/internal/config"
@@ -123,14 +122,12 @@ func (s *Server) Login(c *gin.Context) {
 // QueryBalance 手动触发分组余额查询
 // 检查余额查询开关并加锁防止与定时查询竞态
 func (s *Server) QueryBalance(c *gin.Context) {
-	groupIDStr := c.Param("id")
-	groupID, err := strconv.Atoi(groupIDStr)
-	if err != nil || groupID <= 0 {
-		response.Error(c, app_errors.NewAPIError(app_errors.ErrBadRequest, i18n.Message(c, "handler.invalid_group_id")))
+	groupID, ok := parseIDParam(c, "id", "handler.invalid_group_id")
+	if !ok {
 		return
 	}
 
-	group, err := s.GroupManager.GetGroupByID(uint(groupID))
+	group, err := s.GroupManager.GetGroupByID(groupID)
 	if err != nil {
 		response.Error(c, app_errors.ParseDBError(err))
 		return
