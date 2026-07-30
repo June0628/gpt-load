@@ -94,7 +94,9 @@ func (sm *SystemSettingsManager) Initialize(store store.Store, gm groupManager, 
 		if !isMaster {
 			return
 		}
-		gm.Invalidate()
+		if err := gm.Invalidate(); err != nil {
+			logrus.WithError(err).Error("Failed to invalidate group cache after system settings reload")
+		}
 	}
 
 	syncer, err := syncer.NewCacheSyncer(

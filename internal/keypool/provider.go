@@ -534,7 +534,10 @@ func (p *KeyProvider) LoadKeysFromDB() error {
 	for groupID, activeIDs := range allActiveKeyIDs {
 		if len(activeIDs) > 0 {
 			activeKeysListKey := fmt.Sprintf("group:%d:active_keys", groupID)
-			p.store.Delete(activeKeysListKey)
+			if err := p.store.Delete(activeKeysListKey); err != nil {
+				logrus.WithFields(logrus.Fields{"groupID": groupID, "error": err}).Error("Failed to clear stale active keys list for group")
+				continue
+			}
 			if err := p.store.LPush(activeKeysListKey, activeIDs...); err != nil {
 				logrus.WithFields(logrus.Fields{"groupID": groupID, "error": err}).Error("Failed to LPush active keys for group")
 			}
