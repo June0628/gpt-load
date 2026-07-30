@@ -2,18 +2,22 @@ package channel
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
+	app_errors "gpt-load/internal/errors"
 	"gpt-load/internal/httpclient"
 	"gpt-load/internal/models"
 	"gpt-load/internal/types"
 	"gpt-load/internal/utils"
+	"io"
 	"net/http"
 	"net/url"
 	"reflect"
 	"strings"
 	"sync"
 
+	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
 	"gorm.io/datatypes"
 )
@@ -93,6 +97,114 @@ func (b *BaseChannel) BuildUpstreamURL(originalURL *url.URL, groupName string) (
 	finalURL.RawQuery = originalURL.RawQuery
 
 	return finalURL.String(), nil
+}
+
+// IsStreamRequest 通过请求头、查询参数和请求体中的 stream 字段判断是否为流式请求
+func (b *BaseChannel) IsStreamRequest(c *gin.Context, bodyBytes []byte) bool {
+	if strings.Contains(c.GetHeader("Accept"), "text/event-stream") {
+		return true
+	}
+
+	if c.Query("stream") == "true" {
+		return true
+	}
+
+	var p struct {
+		Stream bool `json:"stream"`
+	}
+	if err := json.Unmarshal(bodyBytes, &p); err == nil {
+		return p.Stream
+	}
+
+	return false
+}
+
+// ExtractModel 从请求体的 model 字段中提取模型名称
+func (b *BaseChannel) ExtractModel(c *gin.Context, bodyBytes []byte) string {
+	var p struct {
+		Model string `json:"model"`
+	}
+	if err := json.Unmarshal(bodyBytes, &p); err == nil {
+		return p.Model
+	}
+	return ""
+}
+
+// buildValidationURL 将验证端点的路径和查询参数拼接到上游 URL 上
+func (b *BaseChannel) buildValidationURL() (string, error) {
+	upstreamURL := b.getUpstreamURL()
+	if upstreamURL == nil {
+		return "", fmt.Errorf("no upstream URL configured for channel %s", b.Name)
+	}
+
+	endpointURL, err := url.Parse(b.ValidationEndpoint)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse validation endpoint: %w", err)
+	}
+
+	finalURL := *upstreamURL
+	finalURL.Path = strings.TrimRight(finalURL.Path, "/") + endpointURL.Path
+	finalURL.RawQuery = endpointURL.RawQuery
+	return finalURL.String(), nil
+}
+
+// newValidationRequest 构建带 JSON 载荷的验证请求，并应用分组的自定义 header 规则
+func (b *BaseChannel) newValidationRequest(ctx context.Context, reqURL string, payload any, apiKey *models.APIKey, group *models.Group) (*http.Request, error) {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal validation payload: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewBuffer(body))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create validation request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	if len(group.HeaderRuleList) > 0 {
+		headerCtx := utils.NewHeaderVariableContext(group, apiKey)
+		utils.ApplyHeaderRules(req, group.HeaderRuleList, headerCtx)
+	}
+
+	return req, nil
+}
+
+// doValidationRequest 发送验证请求，2xx 表示密钥有效，否则解析上游错误信息
+func (b *BaseChannel) doValidationRequest(req *http.Request) (bool, error) {
+	resp, err := b.GetHTTPClient().Do(req)
+	if err != nil {
+		return false, fmt.Errorf("failed to send validation request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return true, nil
+	}
+
+	errorBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return false, fmt.Errorf("key is invalid (status %d), but failed to read error body: %w", resp.StatusCode, err)
+	}
+
+	return false, fmt.Errorf("[status %d] %s", resp.StatusCode, app_errors.ParseUpstreamError(errorBody))
+}
+
+// validateKeyWithPayload 使用验证端点和给定载荷校验密钥有效性
+func (b *BaseChannel) validateKeyWithPayload(ctx context.Context, apiKey *models.APIKey, group *models.Group, payload any, setAuth func(*http.Request)) (bool, error) {
+	reqURL, err := b.buildValidationURL()
+	if err != nil {
+		return false, err
+	}
+
+	req, err := b.newValidationRequest(ctx, reqURL, payload, apiKey, group)
+	if err != nil {
+		return false, err
+	}
+	if setAuth != nil {
+		setAuth(req)
+	}
+
+	return b.doValidationRequest(req)
 }
 
 // IsConfigStale 检查通道配置是否与提供的分组相比已过期

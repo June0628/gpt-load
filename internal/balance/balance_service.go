@@ -150,49 +150,85 @@ func getUpstreamURLsFromGroup(upstreams datatypes.JSON) ([]string, error) {
 	return urls, nil
 }
 
-// handleDefaultBalance 默认余额查询处理器（尝试标准 OpenAI 格式）
-func handleDefaultBalance(ctx context.Context, baseURL string, apiKey string, customPath string) (*BalanceInfo, error) {
-	// 如果指定了自定义路径，使用自定义路径
-	balancePath := customPath
-	if balancePath == "" {
-		balancePath = "/v1/dashboard/billing/credit_grants"
+// balanceRequest 描述一次余额查询的 HTTP 请求
+type balanceRequest struct {
+	Method  string
+	URL     string
+	Headers map[string]string
+	// StatusMessages 为特定状态码指定专用的错误信息
+	StatusMessages map[int]string
+}
+
+// balanceError 构造查询失败的 BalanceInfo
+func balanceError(format string, args ...any) *BalanceInfo {
+	return &BalanceInfo{
+		Success:      false,
+		ErrorMessage: fmt.Sprintf(format, args...),
+	}
+}
+
+// balanceURL 拼接余额查询地址，customPath 为空时使用 defaultPath
+func balanceURL(baseURL, customPath, defaultPath string) string {
+	path := customPath
+	if path == "" {
+		path = defaultPath
+	}
+	return strings.TrimRight(baseURL, "/") + path
+}
+
+// bearerJSONHeaders 返回 Bearer 认证的 JSON 请求头
+func bearerJSONHeaders(apiKey string) map[string]string {
+	return map[string]string{
+		"Authorization": "Bearer " + apiKey,
+		"Content-Type":  "application/json",
+	}
+}
+
+// fetchBalance 执行余额查询请求并将响应体解码到 out。
+// 返回非 nil 的 *BalanceInfo 表示查询已失败，调用方应直接返回该结果。
+func fetchBalance(ctx context.Context, spec balanceRequest, out any) *BalanceInfo {
+	method := spec.Method
+	if method == "" {
+		method = http.MethodGet
 	}
 
-	reqURL := strings.TrimRight(baseURL, "/") + balancePath
-
-	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
+	req, err := http.NewRequestWithContext(ctx, method, spec.URL, nil)
 	if err != nil {
-		return &BalanceInfo{
-			Success:      false,
-			ErrorMessage: fmt.Sprintf("failed to create request: %v", err),
-		}, nil
+		return balanceError("failed to create request: %v", err)
 	}
-
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-	req.Header.Set("Content-Type", "application/json")
+	for name, value := range spec.Headers {
+		req.Header.Set(name, value)
+	}
 
 	resp, err := serviceHTTPClient.Do(req)
 	if err != nil {
-		return &BalanceInfo{
-			Success:      false,
-			ErrorMessage: fmt.Sprintf("request failed: %v", err),
-		}, nil
+		return balanceError("request failed: %v", err)
 	}
 	defer resp.Body.Close()
 
+	if message, ok := spec.StatusMessages[resp.StatusCode]; ok {
+		return &BalanceInfo{Success: false, ErrorMessage: message}
+	}
 	if resp.StatusCode != http.StatusOK {
-		return &BalanceInfo{
-			Success:      false,
-			ErrorMessage: fmt.Sprintf("HTTP %d", resp.StatusCode),
-		}, nil
+		return balanceError("HTTP %d", resp.StatusCode)
 	}
 
+	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+		return balanceError("failed to parse response: %v", err)
+	}
+
+	return nil
+}
+
+// handleDefaultBalance 默认余额查询处理器（尝试标准 OpenAI 格式）
+func handleDefaultBalance(ctx context.Context, baseURL string, apiKey string, customPath string) (*BalanceInfo, error) {
 	var result map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return &BalanceInfo{
-			Success:      false,
-			ErrorMessage: fmt.Sprintf("failed to parse response: %v", err),
-		}, nil
+	if failure := fetchBalance(ctx, balanceRequest{
+		// 如果指定了自定义路径，使用自定义路径
+		URL:     balanceURL(baseURL, customPath, "/v1/dashboard/billing/credit_grants"),
+		Headers: bearerJSONHeaders(apiKey),
+	}, &result); failure != nil {
+		return failure, nil
 	}
 
 	// 尝试解析标准 OpenAI 格式
@@ -243,51 +279,16 @@ func handleDefaultBalance(ctx context.Context, baseURL string, apiKey string, cu
 
 // handleOpenAIBalance OpenAI 余额查询
 func handleOpenAIBalance(ctx context.Context, baseURL string, apiKey string, customPath string) (*BalanceInfo, error) {
-	balancePath := customPath
-	if balancePath == "" {
-		balancePath = "/v1/dashboard/billing/credit_grants"
-	}
-
-	reqURL := strings.TrimRight(baseURL, "/") + balancePath
-
-	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
-	if err != nil {
-		return &BalanceInfo{
-			Success:      false,
-			ErrorMessage: fmt.Sprintf("failed to create request: %v", err),
-		}, nil
-	}
-
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := serviceHTTPClient.Do(req)
-	if err != nil {
-		return &BalanceInfo{
-			Success:      false,
-			ErrorMessage: fmt.Sprintf("request failed: %v", err),
-		}, nil
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return &BalanceInfo{
-			Success:      false,
-			ErrorMessage: fmt.Sprintf("HTTP %d", resp.StatusCode),
-		}, nil
-	}
-
 	var result struct {
 		TotalGranted   float64 `json:"total_granted"`
 		TotalUsed      float64 `json:"total_used"`
 		TotalAvailable float64 `json:"total_available"`
 	}
-
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return &BalanceInfo{
-			Success:      false,
-			ErrorMessage: fmt.Sprintf("failed to parse response: %v", err),
-		}, nil
+	if failure := fetchBalance(ctx, balanceRequest{
+		URL:     balanceURL(baseURL, customPath, "/v1/dashboard/billing/credit_grants"),
+		Headers: bearerJSONHeaders(apiKey),
+	}, &result); failure != nil {
+		return failure, nil
 	}
 
 	balanceTotal := fmt.Sprintf("%.2f", result.TotalGranted)
@@ -306,48 +307,6 @@ func handleOpenAIBalance(ctx context.Context, baseURL string, apiKey string, cus
 
 // handleSiliconFlowBalance 硅基流动余额查询
 func handleSiliconFlowBalance(ctx context.Context, baseURL string, apiKey string, customPath string) (*BalanceInfo, error) {
-	balancePath := customPath
-	if balancePath == "" {
-		balancePath = "/v1/user/info"
-	}
-
-	reqURL := strings.TrimRight(baseURL, "/") + balancePath
-
-	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
-	if err != nil {
-		return &BalanceInfo{
-			Success:      false,
-			ErrorMessage: fmt.Sprintf("failed to create request: %v", err),
-		}, nil
-	}
-
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := serviceHTTPClient.Do(req)
-	if err != nil {
-		return &BalanceInfo{
-			Success:      false,
-			ErrorMessage: fmt.Sprintf("request failed: %v", err),
-		}, nil
-	}
-	defer resp.Body.Close()
-
-	// 检查 HTTP 状态码
-	if resp.StatusCode == http.StatusUnauthorized {
-		return &BalanceInfo{
-			Success:      false,
-			ErrorMessage: "Key 无效 (401)",
-		}, nil
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return &BalanceInfo{
-			Success:      false,
-			ErrorMessage: fmt.Sprintf("HTTP %d", resp.StatusCode),
-		}, nil
-	}
-
 	// 解析响应，字段为字符串类型（硅基流动 API 将数据嵌套在 data 字段中）
 	// 注意：API 可能不返回根级别的 success 字段，使用指针以区分"缺失"和"false"
 	var result struct {
@@ -361,12 +320,12 @@ func handleSiliconFlowBalance(ctx context.Context, baseURL string, apiKey string
 			Status        string `json:"status"`
 		} `json:"data"`
 	}
-
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return &BalanceInfo{
-			Success:      false,
-			ErrorMessage: fmt.Sprintf("failed to parse response: %v", err),
-		}, nil
+	if failure := fetchBalance(ctx, balanceRequest{
+		URL:            balanceURL(baseURL, customPath, "/v1/user/info"),
+		Headers:        bearerJSONHeaders(apiKey),
+		StatusMessages: map[int]string{http.StatusUnauthorized: "Key 无效 (401)"},
+	}, &result); failure != nil {
+		return failure, nil
 	}
 
 	// 仅当 API 明确返回 success=false 时才报错，字段缺失时视为成功
@@ -401,51 +360,6 @@ func handleSiliconFlowBalance(ctx context.Context, baseURL string, apiKey string
 // handleChatAnywhereBalance ChatAnywhere 余额查询（特殊处理）
 // baseURL 来自分组 Upstreams 配置，基于该 host 拼接余额查询地址。
 func handleChatAnywhereBalance(ctx context.Context, baseURL string, apiKey string, customPath string) (*BalanceInfo, error) {
-	// 余额查询统一使用 tech 域名（官方余额接口），与 Python 脚本保持一致
-	balancePath := customPath
-	if balancePath == "" {
-		balancePath = "/v1/query/balance"
-	}
-	balanceURL := "https://api.chatanywhere.tech" + balancePath
-
-	req, err := http.NewRequestWithContext(ctx, "POST", balanceURL, nil)
-	if err != nil {
-		return &BalanceInfo{
-			Success:      false,
-			ErrorMessage: fmt.Sprintf("failed to create request: %v", err),
-		}, nil
-	}
-
-	// 参照 ChatAnywhere 官方余额查询脚本的请求头配置
-	req.Header.Set("Authorization", apiKey)
-	req.Header.Set("accept", "application/json, text/plain, */*")
-	req.Header.Set("accept-language", "zh-CN,zh;q=0.9,en;q=0.8")
-	req.Header.Set("access-control-allow-headers", "Authorization,Origin, X-Requested-With, Content-Type, Accept")
-	req.Header.Set("access-control-allow-methods", "GET,POST")
-	req.Header.Set("access-control-allow-origin", "*")
-	req.Header.Set("cache-control", "no-cache")
-	req.Header.Set("content-length", "0")
-	req.Header.Set("origin", "https://api.chatanywhere.tech")
-	req.Header.Set("pragma", "no-cache")
-	req.Header.Set("referer", "https://api.chatanywhere.tech/")
-	req.Header.Set("user-agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36")
-
-	resp, err := serviceHTTPClient.Do(req)
-	if err != nil {
-		return &BalanceInfo{
-			Success:      false,
-			ErrorMessage: fmt.Sprintf("request failed: %v", err),
-		}, nil
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return &BalanceInfo{
-			Success:      false,
-			ErrorMessage: fmt.Sprintf("HTTP %d", resp.StatusCode),
-		}, nil
-	}
-
 	// 使用结构体解析，匹配 ChatAnywhere 余额查询 API 返回的字段
 	var result struct {
 		AdminKeyID   int     `json:"adminKeyId"`
@@ -455,11 +369,27 @@ func handleChatAnywhereBalance(ctx context.Context, baseURL string, apiKey strin
 		ID           int     `json:"id"`
 		Status       int     `json:"status"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return &BalanceInfo{
-			Success:      false,
-			ErrorMessage: fmt.Sprintf("failed to parse response: %v", err),
-		}, nil
+	// 余额查询统一使用 tech 域名（官方余额接口），与 Python 脚本保持一致
+	if failure := fetchBalance(ctx, balanceRequest{
+		Method: http.MethodPost,
+		URL:    balanceURL("https://api.chatanywhere.tech", customPath, "/v1/query/balance"),
+		// 参照 ChatAnywhere 官方余额查询脚本的请求头配置
+		Headers: map[string]string{
+			"Authorization":                apiKey,
+			"accept":                       "application/json, text/plain, */*",
+			"accept-language":              "zh-CN,zh;q=0.9,en;q=0.8",
+			"access-control-allow-headers": "Authorization,Origin, X-Requested-With, Content-Type, Accept",
+			"access-control-allow-methods": "GET,POST",
+			"access-control-allow-origin":  "*",
+			"cache-control":                "no-cache",
+			"content-length":               "0",
+			"origin":                       "https://api.chatanywhere.tech",
+			"pragma":                       "no-cache",
+			"referer":                      "https://api.chatanywhere.tech/",
+			"user-agent":                   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+		},
+	}, &result); failure != nil {
+		return failure, nil
 	}
 
 	// 格式化余额字段
@@ -488,40 +418,6 @@ func handleChatAnywhereBalance(ctx context.Context, baseURL string, apiKey strin
 
 // handleDeepSeekBalance DeepSeek 余额查询
 func handleDeepSeekBalance(ctx context.Context, baseURL string, apiKey string, customPath string) (*BalanceInfo, error) {
-	balancePath := customPath
-	if balancePath == "" {
-		balancePath = "/user/balance"
-	}
-
-	reqURL := strings.TrimRight(baseURL, "/") + balancePath
-
-	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
-	if err != nil {
-		return &BalanceInfo{
-			Success:      false,
-			ErrorMessage: fmt.Sprintf("failed to create request: %v", err),
-		}, nil
-	}
-
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := serviceHTTPClient.Do(req)
-	if err != nil {
-		return &BalanceInfo{
-			Success:      false,
-			ErrorMessage: fmt.Sprintf("request failed: %v", err),
-		}, nil
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return &BalanceInfo{
-			Success:      false,
-			ErrorMessage: fmt.Sprintf("HTTP %d", resp.StatusCode),
-		}, nil
-	}
-
 	// DeepSeek 余额查询 API 返回格式：
 	// {
 	//   "is_available": boolean,
@@ -544,11 +440,11 @@ func handleDeepSeekBalance(ctx context.Context, baseURL string, apiKey string, c
 		} `json:"balance_infos"`
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return &BalanceInfo{
-			Success:      false,
-			ErrorMessage: fmt.Sprintf("failed to parse response: %v", err),
-		}, nil
+	if failure := fetchBalance(ctx, balanceRequest{
+		URL:     balanceURL(baseURL, customPath, "/user/balance"),
+		Headers: bearerJSONHeaders(apiKey),
+	}, &result); failure != nil {
+		return failure, nil
 	}
 
 	// 如果没有余额信息，返回失败
@@ -579,40 +475,6 @@ func handleDeepSeekBalance(ctx context.Context, baseURL string, apiKey string, c
 
 // handleMoonshotBalance 月之暗面余额查询
 func handleMoonshotBalance(ctx context.Context, baseURL string, apiKey string, customPath string) (*BalanceInfo, error) {
-	balancePath := customPath
-	if balancePath == "" {
-		balancePath = "/v1/users/me/balance"
-	}
-
-	reqURL := strings.TrimRight(baseURL, "/") + balancePath
-
-	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
-	if err != nil {
-		return &BalanceInfo{
-			Success:      false,
-			ErrorMessage: fmt.Sprintf("failed to create request: %v", err),
-		}, nil
-	}
-
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := serviceHTTPClient.Do(req)
-	if err != nil {
-		return &BalanceInfo{
-			Success:      false,
-			ErrorMessage: fmt.Sprintf("request failed: %v", err),
-		}, nil
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return &BalanceInfo{
-			Success:      false,
-			ErrorMessage: fmt.Sprintf("HTTP %d", resp.StatusCode),
-		}, nil
-	}
-
 	var result struct {
 		Code int `json:"code"`
 		Data struct {
@@ -624,11 +486,11 @@ func handleMoonshotBalance(ctx context.Context, baseURL string, apiKey string, c
 		Status bool   `json:"status"`
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return &BalanceInfo{
-			Success:      false,
-			ErrorMessage: fmt.Sprintf("failed to parse response: %v", err),
-		}, nil
+	if failure := fetchBalance(ctx, balanceRequest{
+		URL:     balanceURL(baseURL, customPath, "/v1/users/me/balance"),
+		Headers: bearerJSONHeaders(apiKey),
+	}, &result); failure != nil {
+		return failure, nil
 	}
 
 	if result.Code != 0 || !result.Status {
@@ -663,41 +525,6 @@ func handleSparkBalance(ctx context.Context, baseURL string, apiKey string, cust
 
 // handleDashScopeBalance 通义千问余额查询
 func handleDashScopeBalance(ctx context.Context, baseURL string, apiKey string, customPath string) (*BalanceInfo, error) {
-	balancePath := customPath
-	if balancePath == "" {
-		balancePath = "/api/v1/account/balance"
-	}
-
-	reqURL := strings.TrimRight(baseURL, "/") + balancePath
-
-	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
-	if err != nil {
-		return &BalanceInfo{
-			Success:      false,
-			ErrorMessage: fmt.Sprintf("failed to create request: %v", err),
-		}, nil
-	}
-
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-DashScope-SPL", "enable")
-
-	resp, err := serviceHTTPClient.Do(req)
-	if err != nil {
-		return &BalanceInfo{
-			Success:      false,
-			ErrorMessage: fmt.Sprintf("request failed: %v", err),
-		}, nil
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return &BalanceInfo{
-			Success:      false,
-			ErrorMessage: fmt.Sprintf("HTTP %d", resp.StatusCode),
-		}, nil
-	}
-
 	var result struct {
 		Code string `json:"code"`
 		Data struct {
@@ -706,11 +533,13 @@ func handleDashScopeBalance(ctx context.Context, baseURL string, apiKey string, 
 		} `json:"data"`
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return &BalanceInfo{
-			Success:      false,
-			ErrorMessage: fmt.Sprintf("failed to parse response: %v", err),
-		}, nil
+	headers := bearerJSONHeaders(apiKey)
+	headers["X-DashScope-SPL"] = "enable"
+	if failure := fetchBalance(ctx, balanceRequest{
+		URL:     balanceURL(baseURL, customPath, "/api/v1/account/balance"),
+		Headers: headers,
+	}, &result); failure != nil {
+		return failure, nil
 	}
 
 	if result.Code != "Success" {
@@ -738,41 +567,6 @@ func handleVolcEngineBalance(ctx context.Context, baseURL string, apiKey string,
 // 使用 /api/user/self 接口查询用户信息和余额
 // 文档参考：https://docs.aihubmix.com/llms.txt
 func handleAihubmixBalance(ctx context.Context, baseURL string, apiKey string, customPath string) (*BalanceInfo, error) {
-	balancePath := customPath
-	if balancePath == "" {
-		balancePath = "/api/user/self"
-	}
-
-	reqURL := strings.TrimRight(baseURL, "/") + balancePath
-
-	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
-	if err != nil {
-		return &BalanceInfo{
-			Success:      false,
-			ErrorMessage: fmt.Sprintf("failed to create request: %v", err),
-		}, nil
-	}
-
-	// AIHubMix 使用 Manage Key 进行认证
-	req.Header.Set("Authorization", apiKey)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := serviceHTTPClient.Do(req)
-	if err != nil {
-		return &BalanceInfo{
-			Success:      false,
-			ErrorMessage: fmt.Sprintf("request failed: %v", err),
-		}, nil
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return &BalanceInfo{
-			Success:      false,
-			ErrorMessage: fmt.Sprintf("HTTP %d", resp.StatusCode),
-		}, nil
-	}
-
 	var result struct {
 		Success bool `json:"success"`
 		Data    struct {
@@ -784,11 +578,15 @@ func handleAihubmixBalance(ctx context.Context, baseURL string, apiKey string, c
 		Message string `json:"message"`
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return &BalanceInfo{
-			Success:      false,
-			ErrorMessage: fmt.Sprintf("failed to parse response: %v", err),
-		}, nil
+	if failure := fetchBalance(ctx, balanceRequest{
+		URL: balanceURL(baseURL, customPath, "/api/user/self"),
+		Headers: map[string]string{
+			// AIHubMix 使用 Manage Key 进行认证
+			"Authorization": apiKey,
+			"Content-Type":  "application/json",
+		},
+	}, &result); failure != nil {
+		return failure, nil
 	}
 
 	if !result.Success {
