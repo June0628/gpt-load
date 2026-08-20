@@ -12,7 +12,7 @@ import {
   HelpCircle,
   Save,
   CheckmarkCircle,
-  CloseCircle,
+  CloseCircleOutline,
 } from "@vicons/ionicons5";
 import {
   NAlert,
@@ -318,7 +318,7 @@ async function handleTestLogUpload() {
         <div v-if="testResult" style="margin-top: 12px">
           <n-alert :type="testResult.success ? 'success' : 'error'" :bordered="true" size="small">
             <template #icon>
-              <n-icon :component="testResult.success ? CheckmarkCircle : CloseCircle" size="20" />
+              <n-icon :component="testResult.success ? CheckmarkCircle : CloseCircleOutline" size="20" />
             </template>
             <div>
               <div style="margin-bottom: 4px">

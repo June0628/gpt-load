@@ -11,7 +11,7 @@ import { appState } from "@/utils/app-state";
 import { copy } from "@/utils/clipboard";
 import { getGroupDisplayName, maskProxyKeys } from "@/utils/display";
 import {
-  ArrowDownOutline,
+  ChevronDown,
   CopyOutline,
   EyeOffOutline,
   EyeOutline,
@@ -438,7 +438,7 @@ onMounted(() => {
               >
                 <code class="group-url">
                   {{ groupEndpoint }}
-                  <n-icon :component="ArrowDownOutline" size="12" class="url-arrow" />
+                  <n-icon :component="ChevronDown" size="12" class="url-arrow" />
                 </code>
               </n-dropdown>
             </h3>
