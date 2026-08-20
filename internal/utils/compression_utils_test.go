@@ -139,7 +139,7 @@ func TestRegisterDecompressor(t *testing.T) {
 
 	RegisterDecompressor("custom-test", failingDecompressor{})
 
-	// A failing decompressor degrades gracefully to the original data.
+	// 解压器失败时应优雅降级，返回原始数据
 	got, err := DecompressResponse("custom-test", []byte("data"))
 	if err != nil {
 		t.Fatalf("DecompressResponse() error: %v", err)

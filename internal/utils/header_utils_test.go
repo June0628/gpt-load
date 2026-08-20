@@ -103,7 +103,7 @@ func TestApplyHeaderRules(t *testing.T) {
 }
 
 func TestApplyHeaderRulesNoops(t *testing.T) {
-	// Must not panic on a nil request or empty rules.
+	// nil 请求或空规则不应 panic
 	ApplyHeaderRules(nil, []models.HeaderRule{{Key: "a", Action: "set"}}, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)

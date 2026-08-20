@@ -63,7 +63,7 @@ func TestParseStatusCodeMatcherAcceptsNewlinesAndSpacedRanges(t *testing.T) {
 }
 
 func TestParseStatusCodeMatcherMergesRanges(t *testing.T) {
-	// 500-505 and 506-510 are adjacent, 503 overlaps: all merge into 500-510.
+	// 500-505 与 506-510 相邻，503 重叠，应合并为 500-510
 	m, err := ParseStatusCodeMatcher("506-510,500-505,503")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

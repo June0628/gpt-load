@@ -243,9 +243,27 @@ var MessagesJaJP = map[string]string{
 	"error.export_logs":              "ログのエクスポートに失敗しました",
 
 	// Login related
-	"auth.invalid_request":           "無効なリクエスト形式",
-	"auth.authentication_successful": "認証成功",
-	"auth.authentication_failed":     "認証失敗",
+	"auth.invalid_request":                   "無効なリクエスト形式",
+	"auth.authentication_successful":         "認証成功",
+	"auth.authentication_failed":             "認証失敗",
+
+	// Log upload test related
+	"handler.log_upload_not_enabled":         "ログアップロード機能が有効化されていません",
+	"handler.log_upload_cos_test_success":     "COS設定テスト成功",
+	"handler.log_upload_cos_test_failed":      "COS設定テスト失敗: {error}",
+	"handler.log_upload_cos_incomplete":       "COS設定が不完全です。SecretId、SecretKey、Bucket、Regionを確認してください",
+	"handler.log_upload_cos_auth_failed":      "認証失敗です。SecretIdとSecretKeyを確認してください",
+	"handler.log_upload_cos_not_found":         "バケットが存在しないかアクセスできません",
+	"handler.log_upload_webdav_test_success":  "WebDAV設定テスト成功",
+	"handler.log_upload_webdav_test_failed":    "WebDAV設定テスト失敗: {error}",
+	"handler.log_upload_webdav_url_missing":   "WebDAV URLが設定されていません",
+	"handler.log_upload_webdav_auth_failed":    "認証失敗です。ユーザー名とパスワードを確認してください",
+	"handler.log_upload_webdav_forbidden":      "アクセスが拒否されました。権限設定を確認してください",
+	"handler.log_upload_webdav_not_found":      "WebDAVパスが存在しません",
+	"handler.log_upload_unsupported_provider":  "サポートされていないプロバイダ: {provider}",
+	"handler.log_upload_request_failed":        "リクエストの作成に失敗しました: {error}",
+	"handler.log_upload_connect_failed":        "{service}サービスへの接続に失敗しました: {error}",
+	"handler.log_upload_error_status":          "{service}サービスがエラーステータスコードを返しました: {code}, レスポンス: {body}",
 
 	// Settings success message
 	"settings.update_success": "設定が正常に更新されました。設定はすべてのインスタンスでバックグラウンドで再読み込みされます。",

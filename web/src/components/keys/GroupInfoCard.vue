@@ -10,13 +10,21 @@ import type {
 import { appState } from "@/utils/app-state";
 import { copy } from "@/utils/clipboard";
 import { getGroupDisplayName, maskProxyKeys } from "@/utils/display";
-import { CopyOutline, EyeOffOutline, EyeOutline, Pencil, Trash } from "@vicons/ionicons5";
+import {
+  ArrowDownOutline,
+  CopyOutline,
+  EyeOffOutline,
+  EyeOutline,
+  Pencil,
+  Trash,
+} from "@vicons/ionicons5";
 import {
   NButton,
   NButtonGroup,
   NCard,
   NCollapse,
   NCollapseItem,
+  NDropdown,
   NForm,
   NFormItem,
   NGrid,
@@ -66,6 +74,14 @@ const configOptions = ref<GroupConfigOption[]>([]);
 const showProxyKeys = ref(false);
 const parentAggregateGroups = ref<ParentAggregateGroup[]>([]);
 
+// 网络信息
+interface NetworkInfo {
+  local_ips: string[];
+  outbound_ip: string;
+  server_port: number;
+}
+const networkInfo = ref<NetworkInfo | null>(null);
+
 // 基于当前域名拼接分组端点 URL
 const groupEndpoint = computed(() => {
   if (!props.group?.name) {
@@ -73,6 +89,56 @@ const groupEndpoint = computed(() => {
   }
   return `${window.location.origin}/proxy/${props.group.name}`;
 });
+
+// 构建端点下拉选项列表
+const endpointOptions = computed(() => {
+  if (!props.group?.name) {
+    return [];
+  }
+  const groupName = props.group.name;
+  const port = networkInfo.value?.server_port || 3001;
+  const options: { label: string; url: string }[] = [];
+
+  // 1. 当前域名 + 分组
+  options.push({
+    label: t("keys.endpointDomain"),
+    url: groupEndpoint.value,
+  });
+
+  // 2. 内网 IP + 分组
+  if (networkInfo.value?.local_ips?.length) {
+    for (const ip of networkInfo.value.local_ips) {
+      options.push({
+        label: `${t("keys.endpointLocalIP")} (${ip})`,
+        url: `http://${ip}:${port}/proxy/${groupName}`,
+      });
+    }
+  }
+
+  // 3. 外网 IP + 分组
+  if (networkInfo.value?.outbound_ip) {
+    options.push({
+      label: `${t("keys.endpointOutboundIP")} (${networkInfo.value.outbound_ip})`,
+      url: `http://${networkInfo.value.outbound_ip}:${port}/proxy/${groupName}`,
+    });
+  }
+
+  return options;
+});
+
+// 下拉菜单的渲染选项
+const endpointDropdownOptions = computed(() =>
+  endpointOptions.value.map(opt => ({
+    label: opt.label,
+    key: opt.url,
+    url: opt.url,
+  }))
+);
+
+// 下拉菜单选中后的处理：key 就是 URL
+function handleEndpointSelect(key: string, _option: unknown) {
+  copyUrl(key);
+}
 
 const proxyKeysDisplay = computed(() => {
   if (!props.group?.proxy_keys) {
@@ -335,11 +401,25 @@ async function copyUrl(url: string) {
   }
 }
 
+// 加载网络信息
+async function loadNetworkInfo() {
+  try {
+    const res = await keysApi.getNetworkInfo();
+    networkInfo.value = res;
+  } catch {
+    // 静默失败，不影响页面正常使用
+  }
+}
+
 function resetPage() {
   showEditModal.value = false;
   showCopyModal.value = false;
   expandedName.value = [];
 }
+
+onMounted(() => {
+  loadNetworkInfo();
+});
 </script>
 
 <template>
@@ -350,14 +430,17 @@ function resetPage() {
           <div class="header-left">
             <h3 class="group-title">
               {{ group ? getGroupDisplayName(group) : t("keys.selectGroup") }}
-              <n-tooltip trigger="hover" v-if="group && groupEndpoint">
-                <template #trigger>
-                  <code class="group-url" @click="copyUrl(groupEndpoint)">
-                    {{ groupEndpoint }}
-                  </code>
-                </template>
-                {{ t("keys.clickToCopy") }}
-              </n-tooltip>
+              <n-dropdown
+                trigger="click"
+                :options="endpointDropdownOptions"
+                @select="handleEndpointSelect"
+                v-if="group && groupEndpoint"
+              >
+                <code class="group-url">
+                  {{ groupEndpoint }}
+                  <n-icon :component="ArrowDownOutline" size="12" class="url-arrow" />
+                </code>
+              </n-dropdown>
             </h3>
           </div>
           <div class="header-actions">
@@ -883,6 +966,12 @@ function resetPage() {
   border: 1px solid var(--border-color);
   cursor: pointer;
   transition: all 0.2s ease;
+}
+
+.url-arrow {
+  margin-left: 2px;
+  vertical-align: middle;
+  opacity: 0.6;
 }
 
 .group-id {

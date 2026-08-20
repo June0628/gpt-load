@@ -280,3 +280,18 @@ type KeyDailyRequest struct {
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
+
+// BalanceHistory 对应 balance_histories 表，记录每次余额查询的历史快照
+type BalanceHistory struct {
+	ID           uint      `gorm:"primaryKey;autoIncrement" json:"id"`
+	GroupID      uint      `gorm:"not null;index:idx_balance_history_group_id" json:"group_id"`
+	GroupName    string    `gorm:"type:varchar(255);index:idx_balance_history_group_name" json:"group_name"`
+	KeyID        uint      `gorm:"not null;index:idx_balance_history_key_id" json:"key_id"`
+	KeyHash      string    `gorm:"type:varchar(128);index" json:"key_hash"`
+	BalanceTotal string    `gorm:"type:varchar(100)" json:"balance_total"`
+	BalanceUsed  string    `gorm:"type:varchar(100)" json:"balance_used"`
+	Currency     string    `gorm:"type:varchar(20)" json:"currency"`
+	Status       string    `gorm:"type:varchar(100)" json:"status"`
+	QueriedAt    time.Time `gorm:"not null;index:idx_balance_history_queried_at" json:"queried_at"`
+	CreatedAt    time.Time `json:"created_at"`
+}

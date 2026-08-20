@@ -245,6 +245,24 @@ var MessagesEnUS = map[string]string{
 	"auth.authentication_successful": "Authentication successful",
 	"auth.authentication_failed":     "Authentication failed",
 
+	// Log upload test related
+	"handler.log_upload_not_enabled":         "Log upload is not enabled",
+	"handler.log_upload_cos_test_success":     "COS configuration test succeeded",
+	"handler.log_upload_cos_test_failed":      "COS configuration test failed: {error}",
+	"handler.log_upload_cos_incomplete":       "COS configuration is incomplete, please check SecretId, SecretKey, Bucket and Region",
+	"handler.log_upload_cos_auth_failed":      "Authentication failed, please check SecretId and SecretKey",
+	"handler.log_upload_cos_not_found":         "Bucket does not exist or is not accessible",
+	"handler.log_upload_webdav_test_success":  "WebDAV configuration test succeeded",
+	"handler.log_upload_webdav_test_failed":    "WebDAV configuration test failed: {error}",
+	"handler.log_upload_webdav_url_missing":   "WebDAV URL is not configured",
+	"handler.log_upload_webdav_auth_failed":    "Authentication failed, please check username and password",
+	"handler.log_upload_webdav_forbidden":      "Access denied, please check permission settings",
+	"handler.log_upload_webdav_not_found":      "WebDAV path does not exist",
+	"handler.log_upload_unsupported_provider":  "Unsupported provider: {provider}",
+	"handler.log_upload_request_failed":        "Failed to create request: {error}",
+	"handler.log_upload_connect_failed":        "Failed to connect to {service} service: {error}",
+	"handler.log_upload_error_status":          "{service} service returned error status code: {code}, response: {body}",
+
 	// Settings success message
 	"settings.update_success": "Settings updated successfully. Configuration will be reloaded in the background across all instances.",
 

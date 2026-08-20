@@ -48,66 +48,102 @@ func NewProvider(db *gorm.DB, store store.Store, settingsManager *config.SystemS
 }
 
 // SelectKey 为指定的分组原子性地选择并轮换一个可用的 APIKey。
+// 包含防御性检查：当轮换到的 keyID 在缓存中已不存在（被删除）或状态非 active 时，
+// 自动清除该幽灵 keyID 并继续尝试下一个，避免返回已失效的密钥。
 func (p *KeyProvider) SelectKey(groupID uint) (*models.APIKey, error) {
 	activeKeysListKey := fmt.Sprintf("group:%d:active_keys", groupID)
 
-	// 1. 原子性地从列表中轮换密钥ID
-	keyIDStr, err := p.store.Rotate(activeKeysListKey)
+	// 获取列表长度作为最大重试次数上限，避免无限循环
+	listLen, err := p.store.LLen(activeKeysListKey)
 	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			return nil, app_errors.ErrNoActiveKeys
+		return nil, fmt.Errorf("failed to get active keys list length for group %d: %w", groupID, err)
+	}
+	if listLen == 0 {
+		return nil, app_errors.ErrNoActiveKeys
+	}
+
+	for attempt := 0; attempt < int(listLen); attempt++ {
+		// 1. 原子性地从列表中轮换密钥ID
+		keyIDStr, err := p.store.Rotate(activeKeysListKey)
+		if err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				return nil, app_errors.ErrNoActiveKeys
+			}
+			return nil, fmt.Errorf("failed to rotate key from store: %w", err)
 		}
-		return nil, fmt.Errorf("failed to rotate key from store: %w", err)
+
+		keyID, err := strconv.ParseUint(keyIDStr, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse key ID '%s': %w", keyIDStr, err)
+		}
+
+		// 2. 从HASH中获取密钥详情
+		keyHashKey := fmt.Sprintf("key:%d", keyID)
+		keyDetails, err := p.store.HGetAll(keyHashKey)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get key details for key ID %d: %w", keyID, err)
+		}
+
+		// 3. 防御性检查：key 详情为空说明该 key 已被删除但仍残留在 active_keys 列表中
+		if len(keyDetails) == 0 {
+			logrus.WithField("keyID", keyID).Warn("SelectKey: key ID exists in active list but hash is missing (deleted), cleaning up and trying next")
+			// 尝试从列表中清除这个幽灵 keyID
+			if lremErr := p.store.LRem(activeKeysListKey, 0, keyID); lremErr != nil {
+				logrus.WithError(lremErr).WithField("keyID", keyID).Error("Failed to LRem ghost key from active list")
+			}
+			continue
+		}
+
+		// 4. 防御性检查：status 非 active 的 key 不应出现在 active_keys 列表中
+		if keyDetails["status"] != models.KeyStatusActive {
+			logrus.WithFields(logrus.Fields{"keyID": keyID, "status": keyDetails["status"]}).
+				Warn("SelectKey: key in active list has non-active status, cleaning up and trying next")
+			if lremErr := p.store.LRem(activeKeysListKey, 0, keyID); lremErr != nil {
+				logrus.WithError(lremErr).WithField("keyID", keyID).Error("Failed to LRem stale key from active list")
+			}
+			continue
+		}
+
+		// 5. 手动将map反序列化为APIKey结构体
+		failureCount, err := strconv.ParseInt(keyDetails["failure_count"], 10, 64)
+		if err != nil {
+			logrus.WithFields(logrus.Fields{"keyID": keyID, "raw": keyDetails["failure_count"], "error": err}).
+				Warn("Failed to parse failure_count from store cache, defaulting to 0")
+			failureCount = 0
+		}
+		createdAt, err := strconv.ParseInt(keyDetails["created_at"], 10, 64)
+		if err != nil {
+			logrus.WithFields(logrus.Fields{"keyID": keyID, "raw": keyDetails["created_at"], "error": err}).
+				Warn("Failed to parse created_at from store cache, defaulting to 0")
+			createdAt = 0
+		}
+
+		// 解密密钥值供channel使用
+		encryptedKeyValue := keyDetails["key_string"]
+		decryptedKeyValue, err := p.encryptionSvc.Decrypt(encryptedKeyValue)
+		if err != nil {
+			// 如果解密失败，尝试直接使用原始值（兼容未加密的密钥）
+			logrus.WithFields(logrus.Fields{
+				"keyID": keyID,
+				"error": err,
+			}).Debug("Failed to decrypt key value, using as-is for backward compatibility")
+			decryptedKeyValue = encryptedKeyValue
+		}
+
+		apiKey := &models.APIKey{
+			ID:           uint(keyID),
+			KeyValue:     decryptedKeyValue,
+			Status:       keyDetails["status"],
+			FailureCount: failureCount,
+			GroupID:      groupID,
+			CreatedAt:    time.Unix(createdAt, 0),
+		}
+
+		return apiKey, nil
 	}
 
-	keyID, err := strconv.ParseUint(keyIDStr, 10, 64)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse key ID '%s': %w", keyIDStr, err)
-	}
-
-	// 2. 从HASH中获取密钥详情
-	keyHashKey := fmt.Sprintf("key:%d", keyID)
-	keyDetails, err := p.store.HGetAll(keyHashKey)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get key details for key ID %d: %w", keyID, err)
-	}
-
-	// 3. 手动将map反序列化为APIKey结构体
-	failureCount, err := strconv.ParseInt(keyDetails["failure_count"], 10, 64)
-	if err != nil {
-		logrus.WithFields(logrus.Fields{"keyID": keyID, "raw": keyDetails["failure_count"], "error": err}).
-			Warn("Failed to parse failure_count from store cache, defaulting to 0")
-		failureCount = 0
-	}
-	createdAt, err := strconv.ParseInt(keyDetails["created_at"], 10, 64)
-	if err != nil {
-		logrus.WithFields(logrus.Fields{"keyID": keyID, "raw": keyDetails["created_at"], "error": err}).
-			Warn("Failed to parse created_at from store cache, defaulting to 0")
-		createdAt = 0
-	}
-
-	// 解密密钥值供channel使用
-	encryptedKeyValue := keyDetails["key_string"]
-	decryptedKeyValue, err := p.encryptionSvc.Decrypt(encryptedKeyValue)
-	if err != nil {
-		// 如果解密失败，尝试直接使用原始值（兼容未加密的密钥）
-		logrus.WithFields(logrus.Fields{
-			"keyID": keyID,
-			"error": err,
-		}).Debug("Failed to decrypt key value, using as-is for backward compatibility")
-		decryptedKeyValue = encryptedKeyValue
-	}
-
-	apiKey := &models.APIKey{
-		ID:           uint(keyID),
-		KeyValue:     decryptedKeyValue,
-		Status:       keyDetails["status"],
-		FailureCount: failureCount,
-		GroupID:      groupID,
-		CreatedAt:    time.Unix(createdAt, 0),
-	}
-
-	return apiKey, nil
+	// 所有 key 都无效（全部是幽灵或非 active），返回无可用密钥
+	return nil, app_errors.ErrNoActiveKeys
 }
 
 // SelectKeyWithModelCheck 为指定的分组选择密钥，同时检查模型维度限流（仅针对魔塔平台）
@@ -888,10 +924,11 @@ func (p *KeyProvider) addKeysToCacheBatch(groupID uint, keys []models.APIKey) er
 }
 
 // removeKeyFromStore 从缓存中移除单个密钥的辅助函数
+// 先从 active_keys 列表移除 keyID，再删除 key hash，确保两者都成功
 func (p *KeyProvider) removeKeyFromStore(keyID, groupID uint) error {
 	activeKeysListKey := fmt.Sprintf("group:%d:active_keys", groupID)
 	if err := p.store.LRem(activeKeysListKey, 0, keyID); err != nil {
-		logrus.WithFields(logrus.Fields{"keyID": keyID, "groupID": groupID, "error": err}).Error("Failed to LRem key from active list")
+		return fmt.Errorf("failed to LRem key %d from active list for group %d: %w", keyID, groupID, err)
 	}
 
 	keyHashKey := fmt.Sprintf("key:%d", keyID)
@@ -944,6 +981,26 @@ func (p *KeyProvider) UpdateBalanceSync(apiKey *models.APIKey, group *models.Gro
 			"error":  err,
 		}).Error("Failed to update key balance in database")
 		return fmt.Errorf("update balance in db: %w", err)
+	}
+
+	// 记录余额查询历史快照，失败不影响主流程
+	history := models.BalanceHistory{
+		GroupID:      group.ID,
+		GroupName:    group.Name,
+		KeyID:        apiKey.ID,
+		KeyHash:      apiKey.KeyHash,
+		BalanceTotal: balanceInfo.BalanceTotal,
+		BalanceUsed:  balanceInfo.BalanceUsed,
+		Currency:     balanceInfo.Currency,
+		Status:       balanceInfo.Status,
+		QueriedAt:    time.Now(),
+	}
+	if err := p.db.Create(&history).Error; err != nil {
+		logrus.WithFields(logrus.Fields{
+			"key_id":  apiKey.ID,
+			"group_id": group.ID,
+			"error":   err,
+		}).Warn("Failed to record balance history")
 	}
 
 	// 更新缓存，失败时重试最多 3 次

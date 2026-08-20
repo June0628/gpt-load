@@ -701,3 +701,34 @@ func (s *Server) GetParentAggregateGroups(c *gin.Context) {
 
 	response.Success(c, parentGroups)
 }
+
+// GetBalanceHistory 获取分组的余额查询历史记录
+// 支持按 key_id 过滤，按时间倒序排列，分页返回
+func (s *Server) GetBalanceHistory(c *gin.Context) {
+	groupID, ok := parseGroupIDParam(c)
+	if !ok {
+		return
+	}
+
+	query := s.DB.WithContext(c.Request.Context()).
+		Model(&models.BalanceHistory{}).
+		Where("group_id = ?", groupID).
+		Order("queried_at DESC")
+
+	// 可选：按密钥 ID 过滤
+	if keyIDStr := c.Query("key_id"); keyIDStr != "" {
+		if keyID, err := strconv.Atoi(keyIDStr); err == nil && keyID > 0 {
+			query = query.Where("key_id = ?", keyID)
+		}
+	}
+
+	var histories []models.BalanceHistory
+	result, err := response.Paginate(c, query, &histories)
+	if err != nil {
+		logrus.WithContext(c.Request.Context()).WithError(err).Error("Failed to fetch balance history")
+		response.Error(c, app_errors.ErrInternalServer)
+		return
+	}
+
+	response.Success(c, result)
+}

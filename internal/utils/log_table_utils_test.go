@@ -18,12 +18,12 @@ func TestValidateLogTableName(t *testing.T) {
 		"",
 		"request_logs",
 		"request_logs_",
-		"request_logs_2026010",   // 7 digits
-		"request_logs_202601011", // 9 digits
-		"request_logs_2026010a",  // non-digit
-		"logs_20260101",          // wrong prefix
-		"xrequest_logs_20260101", // prefix not anchored
-		"request_logs_20260101x", // suffix not anchored
+		"request_logs_2026010",   // 7位数字
+		"request_logs_202601011", // 9位数字
+		"request_logs_2026010a",  // 含非数字
+		"logs_20260101",          // 前缀错误
+		"xrequest_logs_20260101", // 前缀未锚定
+		"request_logs_20260101x", // 后缀未锚定
 		"request_logs_20260101; DROP TABLE users",
 	}
 	for _, name := range invalid {

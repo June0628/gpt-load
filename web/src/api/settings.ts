@@ -37,6 +37,14 @@ export const settingsApi = {
     const response = await http.post("/settings/log-tables/upload", { table_name: tableName });
     return response as any;
   },
+  async testLogUploadConfig(
+    config?: Record<string, string | number | boolean>
+  ): Promise<TestLogUploadResult> {
+    const response = await http.post("/settings/test-log-upload", config || {}, {
+      hideMessage: true,
+    });
+    return response.data;
+  },
 };
 
 export interface LogTableInfo {
@@ -45,4 +53,11 @@ export interface LogTableInfo {
   row_count: number;
   size_bytes: number;
   size_human: string;
+}
+
+export interface TestLogUploadResult {
+  success: boolean;
+  provider: string;
+  message: string;
+  test_time: string;
 }

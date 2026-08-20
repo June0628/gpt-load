@@ -1,8 +1,21 @@
 <script setup lang="ts">
-import { settingsApi, type LogTableInfo, type Setting, type SettingCategory } from "@/api/settings";
-import ProxyKeysInput from "@/components/common/ProxyKeysInput.vue";
-import { CloudUploadOutline, HelpCircle, Save } from "@vicons/ionicons5";
 import {
+  settingsApi,
+  type LogTableInfo,
+  type Setting,
+  type SettingCategory,
+  type TestLogUploadResult,
+} from "@/api/settings";
+import ProxyKeysInput from "@/components/common/ProxyKeysInput.vue";
+import {
+  CloudUploadOutline,
+  HelpCircle,
+  Save,
+  CheckmarkCircle,
+  CloseCircle,
+} from "@vicons/ionicons5";
+import {
+  NAlert,
   NButton,
   NCard,
   NEmpty,
@@ -36,6 +49,10 @@ const message = useMessage();
 const logTables = ref<LogTableInfo[]>([]);
 const selectedTable = ref<string | null>(null);
 const isUploading = ref(false);
+
+// 日志上传配置测试相关
+const testResult = ref<TestLogUploadResult | null>(null);
+const isTesting = ref(false);
 
 const logTableOptions = computed(() =>
   logTables.value.map(table => ({
@@ -144,6 +161,41 @@ function generateValidationRules(item: Setting): FormItemRule[] {
   }
   return rules;
 }
+
+// 测试日志上传配置
+async function handleTestLogUpload() {
+  if (!isLogUploadEnabled.value || isTesting.value) {
+    return;
+  }
+
+  isTesting.value = true;
+  testResult.value = null;
+
+  try {
+    // 将当前表单配置传给后端测试（支持未保存的配置）
+    const result = await settingsApi.testLogUploadConfig(form.value);
+    testResult.value = result;
+
+    // 只在成功时弹出提示，失败时由UI区域显示错误信息
+    if (result.success) {
+      message.success(t("settings.logUploadTestSuccess"));
+    }
+  } catch (error: any) {
+    console.error("Failed to test log upload config:", error);
+
+    // 设置失败结果以便UI显示
+    const errorMessage =
+      error?.response?.data?.message || error?.message || t("settings.logUploadTestError");
+    testResult.value = {
+      success: false,
+      provider: (form.value["log_upload_provider"] as string) || "unknown",
+      message: errorMessage,
+      test_time: new Date().toISOString(),
+    };
+  } finally {
+    isTesting.value = false;
+  }
+}
 </script>
 
 <template>
@@ -235,6 +287,60 @@ function generateValidationRules(item: Setting): FormItemRule[] {
         {{ isSaving ? t("settings.saving") : t("settings.saveSettings") }}
       </n-button>
     </div>
+
+    <!-- 日志上传配置测试 -->
+    <n-card
+      v-if="isLogUploadEnabled"
+      size="small"
+      :title="t('settings.logUploadTest')"
+      hoverable
+      bordered
+      style="margin-top: 16px"
+    >
+      <n-space vertical>
+        <n-text depth="3" style="display: block; margin-bottom: 12px">
+          {{ t("settings.logUploadTestDesc") }}
+        </n-text>
+
+        <n-space align="center">
+          <n-button
+            type="info"
+            size="small"
+            :loading="isTesting"
+            :disabled="isTesting"
+            @click="handleTestLogUpload"
+          >
+            {{ t("settings.testLogUpload") }}
+          </n-button>
+        </n-space>
+
+        <!-- 测试结果显示 -->
+        <div v-if="testResult" style="margin-top: 12px">
+          <n-alert :type="testResult.success ? 'success' : 'error'" :bordered="true" size="small">
+            <template #icon>
+              <n-icon :component="testResult.success ? CheckmarkCircle : CloseCircle" size="20" />
+            </template>
+            <div>
+              <div style="margin-bottom: 4px">
+                {{ testResult.message }}
+              </div>
+              <n-text depth="3" style="font-size: 12px">
+                {{ t("settings.testTime") }}:
+                {{ new Date(testResult.test_time).toLocaleString() }} |
+                {{ t("settings.provider") }}:
+                {{
+                  ["tencent", "cos", "tencent_cos"].includes(testResult.provider)
+                    ? t("settings.providerTencent")
+                    : testResult.provider === "webdav"
+                      ? t("settings.providerWebDAV")
+                      : testResult.provider
+                }}
+              </n-text>
+            </div>
+          </n-alert>
+        </div>
+      </n-space>
+    </n-card>
 
     <!-- 手动备份上传 -->
     <n-card

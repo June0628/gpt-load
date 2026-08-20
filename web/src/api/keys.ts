@@ -1,6 +1,7 @@
 import i18n from "@/locales";
 import type {
   APIKey,
+  BalanceHistory,
   Group,
   GroupConfigOption,
   GroupStatsResponse,
@@ -325,6 +326,37 @@ export const keysApi = {
   // 手动触发分组余额查询
   async queryGroupBalance(groupId: number): Promise<{ message: string; group_name: string }> {
     const res = await http.post(`/groups/${groupId}/query-balance`, {}, { hideMessage: true });
+    return res.data;
+  },
+
+  // 获取分组的余额查询历史记录
+  async getBalanceHistory(
+    groupId: number,
+    params: { page: number; page_size: number; key_id?: number }
+  ): Promise<{
+    items: BalanceHistory[];
+    pagination: {
+      page: number;
+      page_size: number;
+      total_items: number;
+      total_pages: number;
+      has_more: boolean;
+    };
+  }> {
+    const res = await http.get(`/groups/${groupId}/balance-history`, {
+      params,
+      hideMessage: true,
+    });
+    return res.data;
+  },
+
+  // 获取服务器网络信息（内网IP、外网IP、端口）
+  async getNetworkInfo(): Promise<{
+    local_ips: string[];
+    outbound_ip: string;
+    server_port: number;
+  }> {
+    const res = await http.get("/network-info", { hideMessage: true });
     return res.data;
   },
 };

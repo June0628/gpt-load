@@ -94,6 +94,21 @@ export interface GroupBalanceInfo {
   key_details?: KeyBalanceInfo[];
 }
 
+// 余额查询历史记录
+export interface BalanceHistory {
+  id: number;
+  group_id: number;
+  group_name: string;
+  key_id: number;
+  key_hash: string;
+  balance_total: string;
+  balance_used: string;
+  currency: string;
+  status: string;
+  queried_at: string;
+  created_at: string;
+}
+
 export interface Group {
   id?: number;
   name: string;

@@ -124,7 +124,7 @@ func TestSetFieldFromString(t *testing.T) {
 		t.Error("expected error for unsupported field kind")
 	}
 
-	// Unexported/unaddressable values cannot be set.
+	// 未导出/不可寻址的字段无法设置
 	if err := SetFieldFromString(reflect.ValueOf(target).FieldByName("IntField"), "1"); err == nil {
 		t.Error("expected error for non-settable field")
 	}
@@ -145,7 +145,7 @@ func TestDefaultSystemSettingsAppliesDefaultTags(t *testing.T) {
 
 		expected := reflect.New(field.Type).Elem()
 		if err := SetFieldFromString(expected, defaultTag); err != nil {
-			continue // unsupported kind, DefaultSystemSettings only warns
+			continue // 不支持的类型，DefaultSystemSettings 仅告警
 		}
 		if !reflect.DeepEqual(v.Field(i).Interface(), expected.Interface()) {
 			t.Errorf("field %s = %v, want default tag value %v", field.Name, v.Field(i).Interface(), expected.Interface())
@@ -177,7 +177,7 @@ func TestGenerateSettingsMetadata(t *testing.T) {
 		byKey[info.Key] = info
 	}
 
-	// Cross-check a field with a validate tag to confirm min/required parsing.
+	// 交叉校验带 validate 标签的字段，确认 min/required 解析正确
 	tp := reflect.TypeOf(types.SystemSettings{})
 	for i := range tp.NumField() {
 		field := tp.Field(i)

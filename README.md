@@ -10,6 +10,24 @@ English | [中文](README_CN.md) | [日本語](README_JP.md)
 
 A high-performance, enterprise-grade AI API transparent proxy service designed specifically for enterprises and developers who need to integrate multiple AI services. Built with Go, featuring intelligent key management, load balancing, and comprehensive monitoring capabilities, designed for high-concurrency production environments.
 
+## Enhancements in This Fork
+
+While preserving the original GPT-Load design and API compatibility, this fork is actively maintained for high-concurrency, stability, and day-to-day operations:
+
+- **Atomic Daily Counters and Cache Consistency**: Daily per-model request counts were moved from database transactions to atomic Redis / in-memory Store increments, preventing lost concurrent updates; key success and failure handlers reload the final database state after commits before refreshing caches, reducing state overwrites from concurrent writes
+- **High-Concurrency Streaming Protection**: Streamed responses that need logging are buffered through temporary disk files instead of retaining complete payloads in memory, significantly reducing memory pressure and OOM risk for large or highly concurrent responses
+- **Database Lock Retries and Rate-Limit Semantics**: Handles SQLite lock contention consistently and retries MySQL lock wait timeouts (1205) and deadlocks (1213); rate-limited requests return standard HTTP `429` with `Retry-After` so clients can back off correctly
+- **Group-Level Balance Management**: Each group can independently enable balance checks, set an interval, and aggregate balances; operators can manually query all active keys, while scheduled jobs reuse validation concurrency and timeout settings and use a per-group lock to prevent simultaneous manual and scheduled upstream queries
+- **Group Proxy Client Pools**: A group's `proxy_url` accepts comma-separated HTTP / HTTPS / SOCKS5 proxy addresses; each address receives an independent client and requests are round-robin routed. Environment proxies are used when unset, while invalid addresses are skipped with a warning
+- **Key Validity Policies and Alerts**: Groups can keep keys from being invalidated when a request uses an unsupported upstream model capability even though the key remains valid; configurable active-key thresholds send Feishu Webhook alerts when key availability falls too low
+- **Group and Model Quota Controls**: Supports group daily request limits with day boundaries calculated in `Asia/Shanghai`; individual model daily request limits can be configured for fixed-quota providers, blocking only the affected model when exhausted
+- **Isolated ModelScope Quotas**: Reads ModelScope model-level remaining-request headers and tracks the daily allowance by key and model; exhausted models return their quota error without impacting other usable models in the same group or key
+- **Richer Request-Log Details**: Extends existing request bodies, agent files, and call information with `tool_calls` and model `response_body` fields, improving troubleshooting of request flows and tool calls
+- **Daily Request-Log Archive and Cleanup**: Historical daily request-log tables can be exported as CSV to WebDAV or Tencent Cloud COS; supports scheduled archives, manual uploads, automatic removal of old tables only after successful uploads, and automatic splitting for tables over 1 GB
+- **Database Capacity Monitoring**: Periodically checks SQLite file size or MySQL / PostgreSQL database size and proactively sends a Feishu Webhook notification after a configured threshold is exceeded
+- **Frontend Debugging URLs**: The management UI can build and copy complete proxy URLs from the actual application address, replacing the original fixed `localhost:port` display for reverse-proxy, domain, and remote debugging scenarios
+- **Maintenance and Release Improvements**: Maintains dedicated container images, build scripts, and release workflows for Linux, macOS, and Windows to support cross-platform deployment and updates
+
 For detailed documentation, please visit [Official Documentation](https://www.gpt-load.com/docs?lang=en)
 
 <a href="https://trendshift.io/repositories/14880" target="_blank"><img src="https://trendshift.io/api/badge/repositories/14880" alt="tbphp%2Fgpt-load | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>

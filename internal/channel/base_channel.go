@@ -149,7 +149,8 @@ func (b *BaseChannel) buildValidationURL() (string, error) {
 }
 
 // newValidationRequest 构建带 JSON 载荷的验证请求，并应用分组的自定义 header 规则
-func (b *BaseChannel) newValidationRequest(ctx context.Context, reqURL string, payload any, apiKey *models.APIKey, group *models.Group) (*http.Request, error) {
+// setAuth 在 Content-Type 和自定义 header 规则之前执行，以便规则可覆盖认证 header
+func (b *BaseChannel) newValidationRequest(ctx context.Context, reqURL string, payload any, apiKey *models.APIKey, group *models.Group, setAuth func(*http.Request)) (*http.Request, error) {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal validation payload: %w", err)
@@ -158,6 +159,11 @@ func (b *BaseChannel) newValidationRequest(ctx context.Context, reqURL string, p
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewBuffer(body))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create validation request: %w", err)
+	}
+
+	// 先设置认证 header，与主代理流程保持一致：自定义 header 规则可覆盖认证值
+	if setAuth != nil {
+		setAuth(req)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
@@ -196,12 +202,9 @@ func (b *BaseChannel) validateKeyWithPayload(ctx context.Context, apiKey *models
 		return false, err
 	}
 
-	req, err := b.newValidationRequest(ctx, reqURL, payload, apiKey, group)
+	req, err := b.newValidationRequest(ctx, reqURL, payload, apiKey, group, setAuth)
 	if err != nil {
 		return false, err
-	}
-	if setAuth != nil {
-		setAuth(req)
 	}
 
 	return b.doValidationRequest(req)

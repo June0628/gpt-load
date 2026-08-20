@@ -14,6 +14,7 @@ import {
   Pencil,
   RemoveCircleOutline,
   Search,
+  TimeOutline,
 } from "@vicons/ionicons5";
 import {
   NButton,
@@ -31,6 +32,7 @@ import {
 } from "naive-ui";
 import { computed, h, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
+import BalanceHistoryModal from "./BalanceHistoryModal.vue";
 import KeyCreateDialog from "./KeyCreateDialog.vue";
 import KeyDeleteDialog from "./KeyDeleteDialog.vue";
 
@@ -107,6 +109,11 @@ const isRestoring = ref(false);
 
 const createDialogShow = ref(false);
 const deleteDialogShow = ref(false);
+
+// 余额历史弹窗相关
+const balanceHistoryShow = ref(false);
+const balanceHistoryKeyId = ref<number | null>(null);
+const balanceHistoryKeyDisplay = ref("");
 
 // 备注编辑相关
 const notesDialogShow = ref(false);
@@ -575,6 +582,12 @@ async function queryBalance() {
   }
 }
 
+function showBalanceHistory(key: KeyRow) {
+  balanceHistoryKeyId.value = key.id;
+  balanceHistoryKeyDisplay.value = maskKey(key.key_value);
+  balanceHistoryShow.value = true;
+}
+
 async function clearAll() {
   if (!props.selectedGroup?.id || isDeling.value) {
     return;
@@ -799,6 +812,19 @@ function resetPage() {
                   {{ t("keys.testShort") }}
                 </n-button>
                 <n-button
+                  v-if="props.selectedGroup?.balance_query_config?.enabled"
+                  round
+                  tertiary
+                  size="tiny"
+                  @click="showBalanceHistory(key)"
+                  :title="t('keys.balanceHistory')"
+                >
+                  <template #icon>
+                    <n-icon :component="TimeOutline" />
+                  </template>
+                  {{ t("keys.historyShort") }}
+                </n-button>
+                <n-button
                   v-if="key.status !== 'active'"
                   tertiary
                   size="tiny"
@@ -891,6 +917,15 @@ function resetPage() {
       <n-button type="primary" @click="saveKeyNotes">{{ t("common.save") }}</n-button>
     </template>
   </n-modal>
+
+  <!-- 余额历史弹窗 -->
+  <BalanceHistoryModal
+    v-model:show="balanceHistoryShow"
+    :group-id="selectedGroup?.id ?? null"
+    :group-name="selectedGroup ? getGroupDisplayName(selectedGroup) : ''"
+    :key-id="balanceHistoryKeyId"
+    :key-display="balanceHistoryKeyDisplay"
+  />
 </template>
 
 <style scoped>

@@ -7,6 +7,7 @@ import (
 	"gpt-load/internal/middleware"
 	"gpt-load/internal/proxy"
 	"gpt-load/internal/services"
+	"gpt-load/internal/store"
 	"gpt-load/internal/types"
 	"io/fs"
 	"net/http"
@@ -43,6 +44,7 @@ func NewRouter(
 	proxyServer *proxy.ProxyServer,
 	configManager types.ConfigManager,
 	groupManager *services.GroupManager,
+	storage store.Store,
 	buildFS embed.FS,
 	indexPage []byte,
 ) *gin.Engine {
@@ -65,7 +67,7 @@ func NewRouter(
 
 	// 注册路由
 	registerSystemRoutes(router, serverHandler)
-	registerAPIRoutes(router, serverHandler, configManager)
+	registerAPIRoutes(router, serverHandler, configManager, storage)
 	registerProxyRoutes(router, proxyServer, groupManager, serverHandler)
 	registerFrontendRoutes(router, buildFS, indexPage)
 
@@ -82,6 +84,7 @@ func registerAPIRoutes(
 	router *gin.Engine,
 	serverHandler *handler.Server,
 	configManager types.ConfigManager,
+	storage store.Store,
 ) {
 	api := router.Group("/api")
 	api.Use(i18n.Middleware())
@@ -89,7 +92,7 @@ func registerAPIRoutes(
 	authConfig := configManager.GetAuthConfig()
 
 	// 公开
-	registerPublicAPIRoutes(api, serverHandler)
+	registerPublicAPIRoutes(api, serverHandler, storage)
 
 	// 认证
 	protectedAPI := api.Group("")
@@ -98,14 +101,15 @@ func registerAPIRoutes(
 }
 
 // registerPublicAPIRoutes 公开API路由
-func registerPublicAPIRoutes(api *gin.RouterGroup, serverHandler *handler.Server) {
-	api.POST("/auth/login", middleware.LoginRateLimiter(), serverHandler.Login)
+func registerPublicAPIRoutes(api *gin.RouterGroup, serverHandler *handler.Server, storage store.Store) {
+	api.POST("/auth/login", middleware.LoginRateLimiter(storage), serverHandler.Login)
 	api.GET("/integration/info", serverHandler.GetIntegrationInfo)
 }
 
 // registerProtectedAPIRoutes 认证API路由
 func registerProtectedAPIRoutes(api *gin.RouterGroup, serverHandler *handler.Server) {
 	api.GET("/channel-types", serverHandler.CommonHandler.GetChannelTypes)
+	api.GET("/network-info", serverHandler.GetNetworkInfo)
 
 	groups := api.Group("/groups")
 	{
@@ -119,6 +123,7 @@ func registerProtectedAPIRoutes(api *gin.RouterGroup, serverHandler *handler.Ser
 		groups.GET("/:id/stats", serverHandler.GetGroupStats)
 		groups.POST("/:id/copy", serverHandler.CopyGroup)
 		groups.POST("/:id/query-balance", serverHandler.QueryBalance)
+		groups.GET("/:id/balance-history", serverHandler.GetBalanceHistory)
 
 		groups.GET("/:id/sub-groups", serverHandler.GetSubGroups)
 		groups.POST("/:id/sub-groups", serverHandler.AddSubGroups)
@@ -171,6 +176,7 @@ func registerProtectedAPIRoutes(api *gin.RouterGroup, serverHandler *handler.Ser
 		settings.PUT("", serverHandler.UpdateSettings)
 		settings.GET("/log-tables", serverHandler.GetLogTables)
 		settings.POST("/log-tables/upload", serverHandler.ManualUploadLogTable)
+		settings.POST("/test-log-upload", serverHandler.TestLogUploadConfig)
 	}
 }
 

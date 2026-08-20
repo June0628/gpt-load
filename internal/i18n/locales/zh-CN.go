@@ -253,6 +253,24 @@ var MessagesZhCN = map[string]string{
 	"auth.authentication_successful": "认证成功",
 	"auth.authentication_failed":     "认证失败",
 
+	// Log upload test related
+	"handler.log_upload_not_enabled":         "日志上传功能未启用",
+	"handler.log_upload_cos_test_success":   "COS配置测试成功",
+	"handler.log_upload_cos_test_failed":    "COS配置测试失败: {error}",
+	"handler.log_upload_cos_incomplete":     "COS配置不完整，请检查SecretId、SecretKey、Bucket和Region",
+	"handler.log_upload_cos_auth_failed":    "认证失败，请检查SecretId和SecretKey",
+	"handler.log_upload_cos_not_found":      "存储桶不存在或不可访问",
+	"handler.log_upload_webdav_test_success": "WebDAV配置测试成功",
+	"handler.log_upload_webdav_test_failed":  "WebDAV配置测试失败: {error}",
+	"handler.log_upload_webdav_url_missing":  "WebDAV URL未配置",
+	"handler.log_upload_webdav_auth_failed":   "认证失败，请检查用户名和密码",
+	"handler.log_upload_webdav_forbidden":     "访问被拒绝，请检查权限配置",
+	"handler.log_upload_webdav_not_found":      "WebDAV路径不存在",
+	"handler.log_upload_unsupported_provider":  "不支持的提供商: {provider}",
+	"handler.log_upload_request_failed":        "创建请求失败: {error}",
+	"handler.log_upload_connect_failed":        "连接{service}服务失败: {error}",
+	"handler.log_upload_error_status":          "{service}服务返回错误状态码: {code}, 响应: {body}",
+
 	// Settings success message
 	"settings.update_success": "设置更新成功。配置将在后台在所有实例间重新加载。",
 

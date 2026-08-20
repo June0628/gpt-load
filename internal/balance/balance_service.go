@@ -455,21 +455,31 @@ func handleDeepSeekBalance(ctx context.Context, baseURL string, apiKey string, c
 		}, nil
 	}
 
-	// 取第一个余额信息（通常只有一个）
-	info := result.BalanceInfos[0]
-
 	// 状态：根据 is_available 字段判断账户是否可用
 	status := "available"
 	if !result.IsAvailable {
 		status = "unavailable"
 	}
 
+	// DeepSeek 可能返回多种货币（USD + CNY），将所有货币的余额相加
+	// 不做货币换算，直接累加数值；货币字段拼接显示
+	var totalBalance float64
+	currencies := make([]string, 0, len(result.BalanceInfos))
+	for _, info := range result.BalanceInfos {
+		if total, err := parseBalance(info.TotalBalance); err == nil {
+			totalBalance += total
+		}
+		if info.Currency != "" {
+			currencies = append(currencies, info.Currency)
+		}
+	}
+
 	return &BalanceInfo{
 		Success:      true,
-		BalanceTotal: info.TotalBalance,
+		BalanceTotal: fmt.Sprintf("%.2f", totalBalance),
 		BalanceUsed:  "N/A",
 		Status:       status,
-		Currency:     info.Currency,
+		Currency:     strings.Join(currencies, "+"),
 	}, nil
 }
 

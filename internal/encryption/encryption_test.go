@@ -68,7 +68,7 @@ func TestAESDecryptErrors(t *testing.T) {
 	}
 
 	valid, _ := svc.Encrypt("sk-1234567890")
-	// Flip the last hex nibble to corrupt the GCM tag.
+	// 翻转最后一个 hex 字符以破坏 GCM 标签
 	tampered := valid[:len(valid)-1]
 	if valid[len(valid)-1] == '0' {
 		tampered += "1"

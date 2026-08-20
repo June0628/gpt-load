@@ -100,7 +100,7 @@ func (ch *GeminiChannel) ValidateKey(ctx context.Context, apiKey *models.APIKey,
 			},
 		},
 	}
-	req, err := ch.newValidationRequest(ctx, reqURL, payload, apiKey, group)
+	req, err := ch.newValidationRequest(ctx, reqURL, payload, apiKey, group, nil)
 	if err != nil {
 		return false, err
 	}
